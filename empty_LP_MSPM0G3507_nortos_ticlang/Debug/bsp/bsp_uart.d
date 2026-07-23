@@ -1,0 +1,5 @@
+# FIXED
+
+bsp/bsp_uart.o: ../bsp/bsp_uart.c \
+ C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/bsp/bsp_uart.h
+C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/bsp/bsp_uart.h:

@@ -1,0 +1,5 @@
+# FIXED
+
+bsp/bsp_time.o: ../bsp/bsp_time.c \
+ C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/bsp/bsp_time.h
+C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/bsp/bsp_time.h:
