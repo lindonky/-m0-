@@ -24,7 +24,7 @@ typedef enum {
 /** @brief 初始化全部 BSP/驱动/控制器，上电后进入 IDLE，电机禁止。 */
 void App_Car_Init(void);
 
-/** @brief 1 ms 任务：尝试接收循迹新帧并更新时间戳。 */
+/** @brief 1 ms 任务：接收 500 Hz IMU、采样循迹并更新时间戳。 */
 void App_Car_SensorTask1ms(void);
 
 /** @brief 5 ms 任务：编码器、方向环、速度环和电机输出。 */

@@ -4,6 +4,8 @@
 /**
  * @file app_debug.h
  * @brief UART 单字符命令和低频 CSV 遥测应用层。
+ *
+ * 新增 IMU 命令：G=当前偏航角清零，I=开始静止角速度零偏标定。
  */
 
 void App_Debug_Init(void);

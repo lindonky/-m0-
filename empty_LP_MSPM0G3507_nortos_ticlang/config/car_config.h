@@ -82,6 +82,19 @@
 #define CAR_SPEED_RIGHT_KI                 (0.0f)
 #define CAR_SPEED_RIGHT_KD                 (0.0f)
 
+/*
+ * 串口 IMU 参数。
+ * 参考驱动中角度和角速度原始值都乘 0.1；帧频由用户确认为 500 Hz。
+ * 上电配置延迟沿用参考程序的 3000 ms，但采用分时状态机，绝不阻塞主循环。
+ */
+#define CAR_IMU_REPORT_RATE_HZ             (500U)
+#define CAR_IMU_RAW_TO_DEG                 (0.1f)
+#define CAR_IMU_YAW_POLARITY               (+1.0f)
+#define CAR_IMU_DATA_TIMEOUT_MS            (20U)
+#define CAR_IMU_STARTUP_CONFIG_DELAY_MS    (3000U)
+#define CAR_IMU_CALIBRATION_SAMPLES        (500U)
+#define CAR_IMU_MAX_BYTES_PER_UPDATE       (32U)
+
 /* 人机和遥测任务低频运行，避免占用 200 Hz 控制环时间。 */
 #define CAR_DEBUG_PERIOD_MS                (20U)
 #define CAR_OLED_PERIOD_MS                 (100U)

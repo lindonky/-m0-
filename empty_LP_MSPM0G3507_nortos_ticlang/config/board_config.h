@@ -55,13 +55,37 @@
 #define CAR_LINE_ADC_CH_6                    CAR_PIN_UNASSIGNED
 #define CAR_LINE_ADC_CH_7                    CAR_PIN_UNASSIGNED
 
-/* 可选 IMU 与 OLED 共用的 I2C 总线；控制环不能等待 OLED 传输。 */
+/* 预留给其他传感器的硬件 I2C；当前这只 500 Hz IMU 实际使用独立 UART。 */
 #define CAR_I2C_INSTANCE_INDEX               CAR_PIN_UNASSIGNED
 #define CAR_I2C_SCL_GPIO_PORT                CAR_PIN_UNASSIGNED
 #define CAR_I2C_SCL_GPIO_PIN                 CAR_PIN_UNASSIGNED
 #define CAR_I2C_SDA_GPIO_PORT                CAR_PIN_UNASSIGNED
 #define CAR_I2C_SDA_GPIO_PIN                 CAR_PIN_UNASSIGNED
 #define CAR_I2C_BITRATE_HZ                   (400000UL)
+
+/*
+ * 500 Hz 串口 IMU：115200、8 数据位、无校验、1 停止位（8N1）。
+ * 在 SysConfig 中建议把 UART 实例命名为 IMU_UART，并启用 RX 中断。参考例程
+ * 使用 UART3/PB2(TX)/PB3(RX)，但这里不抢占引脚；确认整车接线后再把 READY 改为 1。
+ * IMU 与调试终端必须使用不同 UART，防止二进制帧和 CSV/命令互相污染。
+ */
+#ifndef CAR_IMU_UART_READY
+#define CAR_IMU_UART_READY                  (1U)
+#endif
+#define CAR_IMU_UART_BAUD_RATE              (115200UL)
+
+#if CAR_IMU_UART_READY
+/* TODO：若 SysConfig 生成名不同，只修改以下三个别名和中断入口别名。 */
+#ifndef CAR_IMU_UART_INST
+#define CAR_IMU_UART_INST                   (IMU_UART_INST)
+#endif
+#ifndef CAR_IMU_UART_IRQN
+#define CAR_IMU_UART_IRQN                   (IMU_UART_INST_INT_IRQN)
+#endif
+#ifndef CAR_IMU_UART_IRQ_HANDLER
+#define CAR_IMU_UART_IRQ_HANDLER            IMU_UART_INST_IRQHandler
+#endif
+#endif
 
 /*
  * OLED 使用软件 I2C，不占用上面的硬件 I2C 控制器。
@@ -96,7 +120,7 @@
 #endif
 
 
-/* 调试和后续在线调参 UART。 */
+/* 调试和后续在线调参 UART；不能与上面的 500 Hz IMU UART 共用。 */
 #define CAR_UART_INSTANCE_INDEX              CAR_PIN_UNASSIGNED
 #define CAR_UART_TX_GPIO_PORT                CAR_PIN_UNASSIGNED
 #define CAR_UART_TX_GPIO_PIN                 CAR_PIN_UNASSIGNED

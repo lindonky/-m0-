@@ -7,6 +7,7 @@
 "./bsp/bsp_board.o"
 "./bsp/bsp_encoder.o"
 "./bsp/bsp_i2c.o"
+"./bsp/bsp_imu_uart.o"
 "./bsp/bsp_line_adc.o"
 "./bsp/bsp_oled_soft_i2c.o"
 "./bsp/bsp_tb6612.o"

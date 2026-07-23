@@ -30,9 +30,9 @@ Debug/makefile
 - 轮径；
 - 循迹传感器通道数、模拟/数字类型、左右排列；
 - 黑线相对背景是 ADC 更高还是更低；
-- UART TX/RX 接线；
+- 调试 UART TX/RX 接线；
+- 500 Hz IMU UART TX/RX 接线和模块串口电平；协议驱动已经完成；
 - OLED 的 SCL/SDA 引脚；驱动已按 128×64 SSD1306、地址 0x3C 移植；
-- IMU 型号和总线，仅在需要时提供。
 
 ## 3. TB6612 的 SysConfig 配置
 
@@ -144,7 +144,7 @@ adc12_max_freq_dma
 - 完成 C/E 标定后，黑线目标通道接近 1000，背景接近 0；
 - 线从左向右移动时 `position` 从负值连续变化到正值。
 
-## 7. UART
+## 7. 调试 UART
 
 推荐配置：
 
@@ -159,15 +159,104 @@ adc12_max_freq_dma
 - TX/RX 使用中断环形缓冲或 DMA；
 - 不允许等待一个完整字符串发送完毕。
 
-上层命令：R 开始、S 停止、X 紧急停止、C 开始标定、E 结束标定。
+上层命令：R 开始、S 停止、X 紧急停止、C/E 循迹标定、G 偏航角清零、
+I 开始 IMU 静止零偏标定。
 
-## 8. OLED 软件 I2C 和可选硬件 I2C
+## 8. 500 Hz 串口 IMU
 
-OLED 已使用独立软件 I2C，不占用以后给 IMU 使用的硬件 I2C Controller。当前驱动
+当前 IMU 不是 I2C 芯片，而是自带解算和串口协议的模块。参考工程确认参数如下：
+
+```text
+UART：115200 baud，8N1，无流控
+上报频率：500 Hz（每 2 ms 一帧）
+每帧：9 bytes
+帧格式：0A 03 04 AngleH AngleL DpsH DpsL CRCL CRCH
+角度比例：0.1 degree/LSB
+角速度比例：0.1 degree/second/LSB
+CRC：Modbus CRC16，初值 FFFF，多项式 A001，低字节先传
+配置命令：AA 06 01 01 01 AD 00
+```
+
+### 8.1 接线与 UART 分配
+
+必须给 IMU 使用独立 UART，不能与调试 CSV 串口共用：
+
+```text
+IMU VCC -> 按模块额定电压连接（先核对模块说明）
+IMU GND -> MSPM0 GND
+IMU TX  -> MSPM0 的 IMU_UART_RX
+IMU RX  -> MSPM0 的 IMU_UART_TX
+```
+
+参考例程使用 UART3、PB2 作为 MCU TX、PB3 作为 MCU RX，但本工程没有直接占用
+这两个脚，避免与 TB6612、编码器、ADC 或 OLED 接线冲突。确定整车引脚表后再选择。
+还需要确认模块串口电平是 3.3 V TTL；若模块 TX 是 5 V，不得直接接 MSPM0 RX。
+
+### 8.2 SysConfig
+
+在 `empty.syscfg` 新增一个 UART，建议实例名为 `IMU_UART`：
+
+```text
+波特率：115200
+数据位：8
+校验：None
+停止位：1
+方向：TX + RX
+中断：RX（BSP 运行时还会按需启停 TX 中断）
+```
+
+然后在 `board_config.h` 修改：
+
+```c
+#define CAR_IMU_UART_READY 1U
+```
+
+默认别名期望 SysConfig 生成：
+
+```c
+IMU_UART_INST
+IMU_UART_INST_INT_IRQN
+IMU_UART_INST_IRQHandler
+```
+
+若名字不同，只修改 `CAR_IMU_UART_INST`、`CAR_IMU_UART_IRQN` 和
+`CAR_IMU_UART_IRQ_HANDLER`。BSP 会通过最后一个宏生成真正的中断入口；如果你已
+在其他文件定义同名 IRQHandler，必须只保留一个，并从已有入口调用
+`BSP_IMU_UART_IRQHandler()`。
+
+### 8.3 软件数据流和实时性
+
+```text
+UART RX ISR
+  -> 64 字节 RX 环形缓冲
+  -> 1 ms App_Car_SensorTask1ms
+  -> IMU_Update(0.001f)
+  -> 帧头同步 / CRC / 大端有符号数
+  -> 角度回绕 / 零偏 / 超时
+  -> IMU_GetData()
+```
+
+- 中断中不做浮点计算，也不做 CRC；
+- 1 ms 任务单次最多处理 32 字节，正常 500 Hz 数据只约 4.5 bytes/ms；
+- 原 `motor_crc.c` 的 512 字节查表没有带入，CRC 已用紧凑位算法融合进 `imu.c`；
+- 原参考程序的 3 秒阻塞延时已改为分时计时，到期后非阻塞发送配置命令；
+- 连续 20 ms 没有正确新帧时 `valid=false`；
+- 原始累计角度跨越 `32767 -> -32768` 时会按模运算连续展开；
+- `CAR_IMU_YAW_POLARITY` 可统一反转角度和角速度方向；
+- `IMU_StartGyroCalibration()` 默认静止收集 500 帧，约 1 秒完成；
+- `IMU_ResetYaw()` 只把应用层相对偏航角清零，不写模块内部寄存器。
+
+上板时先让模块静止，观察调试 CSV 中 `imu_valid`、`yaw_x10`、`gyro_x10` 和
+`imu_crc_errors`。若 CRC 持续增长，优先检查波特率、TX/RX 交叉、共地、电平和
+串口干扰，不要用未经验证的角度参与车辆转向控制。
+
+## 9. OLED 软件 I2C 和可选硬件 I2C
+
+OLED 已使用独立软件 I2C，不占用硬件 I2C Controller，也不占用 IMU 的 UART。当前驱动
 对应 128×64 SSD1306、7 位地址 0x3C，并保留江协科技 OLED V2.0 的显存、字体、
 中文和绘图 API。
 
-### 8.1 OLED 接线与电气要求
+### 9.1 OLED 接线与电气要求
 
 ```text
 OLED VCC -> 3.3 V
@@ -179,7 +268,7 @@ OLED SDA -> 任意可用 GPIO（待指定）
 建议给 OLED 使用 3.3 V，避免某些模块把 I2C 上拉到 5 V。检查模块是否已有上拉；
 如果没有，在 SCL/SDA 各加约 4.7 kΩ 到 3.3 V。
 
-### 8.2 SysConfig
+### 9.2 SysConfig
 
 在 SysConfig 添加两个普通数字 GPIO，建议命名为 `OLED_SCL` 和 `OLED_SDA`。BSP
 使用输出使能模拟开漏：输出低时主动下拉，输出高时关闭输出并由电阻上拉。因此
@@ -197,7 +286,7 @@ OLED SDA -> 任意可用 GPIO（待指定）
 `CAR_OLED_SOFT_I2C_DELAY_CYCLES` 控制位间隔，应使用示波器观察 SCL 后调整。该短
 忙等只形成软件 I2C 时序，CPU 不会进入休眠。
 
-### 8.3 调用限制
+### 9.3 调用限制
 
 - `OLED_Init()` 应在供电稳定后、车辆起跑前调用；
 - `OLED_IsConnected()` 可检查初始化/最近写入是否全部收到 ACK；
@@ -206,9 +295,10 @@ OLED SDA -> 任意可用 GPIO（待指定）
 - 禁止在 ISR、1 ms 传感器任务或 5 ms 控制任务中刷新 OLED；
 - OLED 无应答不能影响电机控制。
 
-IMU 仍建议使用独立硬件 I2C Controller 和 repeated-start，优先级高于 OLED。
+OLED 软件 I2C 和 IMU UART 互不占用同一个外设实例，但仍应避免把 OLED 整屏刷新
+放进 1 ms IMU 接收任务或 5 ms 控制任务。
 
-## 9. 首次通电安全顺序
+## 10. 首次通电安全顺序
 
 MG513 铭牌堵转电流约 2.8 A，而 TB6612 常用连续输出能力约为 1.2 A/通道。不要把
 TB6612 的短时峰值能力当成可持续电流；调试时应限制占空比、避免卡死车轮，并关注
@@ -228,13 +318,14 @@ TB6612 的短时峰值能力当成可持续电流；调试时应限制占空比�
 
 不要在理论 1560 count/圈尚未实测确认时直接高速闭环运行。
 
-## 10. 建议联调阶段和完成标准
+## 11. 建议联调阶段和完成标准
 
 ### 阶段 A：基础通信
 
 - 1 ms 时间正确；
-- UART 能收发；
-- R/S/X/C/E 都能改变状态。
+- 调试 UART 能收发；
+- IMU UART 在 500 Hz 下不溢出且 CRC 稳定；
+- R/S/X/C/E/G/I 命令行为正确。
 
 ### 阶段 B：电机开环
 
@@ -266,7 +357,7 @@ TB6612 的短时峰值能力当成可持续电流；调试时应限制占空比�
 - 再加入 D 抑制摆动；
 - 最后增加弯道降速和直线速度。
 
-## 11. 工程构建注意事项
+## 12. 工程构建注意事项
 
 复制或新增目录后，在 CCS Theia 中：
 

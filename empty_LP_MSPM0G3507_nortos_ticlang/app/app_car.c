@@ -13,6 +13,7 @@
 #include "control/speed_control.h"
 #include "control/vehicle_mixer.h"
 #include "drivers/encoder.h"
+#include "drivers/imu.h"
 #include "drivers/line_sensor.h"
 #include "drivers/motor.h"
 
@@ -27,6 +28,8 @@ void App_Car_Init(void)
     Motor_Init();
     Encoder_Init();
     LineSensor_Init();
+    /* UART 未配置时 IMU_Init 安全返回 false；协议状态仍会被复位。 */
+    (void) IMU_Init();
     LineControl_Init();
     SpeedControl_Init();
     g_lastLineSeenMs = BSP_Time_GetMs();
@@ -36,6 +39,9 @@ void App_Car_Init(void)
 
 void App_Car_SensorTask1ms(void)
 {
+    /* 500 Hz IMU 每 2 ms 一帧；1 ms 任务负责排空 UART 队列和检查超时。 */
+    (void) IMU_Update(0.001f);
+
     /* 只有完整新帧且确认在线，才刷新丢线看门时间。 */
     if (LineSensor_Sample() && LineSensor_GetData()->lineDetected) {
         g_lastLineSeenMs = BSP_Time_GetMs();

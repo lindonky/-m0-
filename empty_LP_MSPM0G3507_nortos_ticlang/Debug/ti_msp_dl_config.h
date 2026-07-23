@@ -77,13 +77,36 @@ extern "C" {
 
 
 
+/* Defines for IMU_UART */
+#define IMU_UART_INST                                                      UART0
+#define IMU_UART_INST_FREQUENCY                                         32000000
+#define IMU_UART_INST_IRQHandler                                UART0_IRQHandler
+#define IMU_UART_INST_INT_IRQN                                    UART0_INT_IRQn
+#define GPIO_IMU_UART_RX_PORT                                              GPIOA
+#define GPIO_IMU_UART_TX_PORT                                              GPIOA
+#define GPIO_IMU_UART_RX_PIN                                      DL_GPIO_PIN_11
+#define GPIO_IMU_UART_TX_PIN                                      DL_GPIO_PIN_10
+#define GPIO_IMU_UART_IOMUX_RX                                   (IOMUX_PINCM22)
+#define GPIO_IMU_UART_IOMUX_TX                                   (IOMUX_PINCM21)
+#define GPIO_IMU_UART_IOMUX_RX_FUNC                    IOMUX_PINCM22_PF_UART0_RX
+#define GPIO_IMU_UART_IOMUX_TX_FUNC                    IOMUX_PINCM21_PF_UART0_TX
+#define IMU_UART_BAUD_RATE                                              (115200)
+#define IMU_UART_IBRD_32_MHZ_115200_BAUD                                    (17)
+#define IMU_UART_FBRD_32_MHZ_115200_BAUD                                    (23)
+
+
+
+
 /* clang-format on */
 
 void SYSCFG_DL_init(void);
 void SYSCFG_DL_initPower(void);
 void SYSCFG_DL_GPIO_init(void);
 void SYSCFG_DL_SYSCTL_init(void);
+void SYSCFG_DL_IMU_UART_init(void);
 
+bool SYSCFG_DL_saveConfiguration(void);
+bool SYSCFG_DL_restoreConfiguration(void);
 
 #ifdef __cplusplus
 }

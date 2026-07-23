@@ -13,6 +13,7 @@
 #include "bsp/bsp_uart.h"
 #include "control/speed_control.h"
 #include "drivers/encoder.h"
+#include "drivers/imu.h"
 #include "drivers/line_sensor.h"
 #include "drivers/motor.h"
 
@@ -29,6 +30,8 @@ void App_Debug_PollCommands(void)
         case 'x': case 'X': App_Car_EmergencyStop(); break;
         case 'c': case 'C': App_Car_StartCalibration(); break;
         case 'e': case 'E': App_Car_FinishCalibration(); break;
+        case 'g': case 'G': IMU_ResetYaw(); break;
+        case 'i': case 'I': IMU_StartGyroCalibration(); break;
         default: break;
         }
     }
@@ -42,13 +45,16 @@ void App_Debug_Task(void)
     const Encoder_Data *left = Encoder_GetLeft();
     const Encoder_Data *right = Encoder_GetRight();
     const Motor_Status *motor = Motor_GetStatus();
+    const IMU_Data *imu = IMU_GetData();
+    const IMU_Diagnostics *imuDiag = IMU_GetDiagnostics();
 
     /*
-     * 字段顺序：时间、状态、位置×1000、左右速度、左右占空比、是否在线。
+     * 字段顺序：时间、状态、位置×1000、左右速度、左右占空比、是否在线、
+     * IMU有效、偏航角×10、角速度×10、IMU CRC错误数。
      * 只格式化整数，避免链接浮点 printf。
      */
     length = snprintf(buffer, sizeof(buffer),
-        "%lu,%u,%ld,%ld,%ld,%d,%d,%u\r\n",
+        "%lu,%u,%ld,%ld,%ld,%d,%d,%u,%u,%ld,%ld,%lu\r\n",
         (unsigned long) BSP_Time_GetMs(),
         (unsigned int) App_Car_GetState(),
         (long) (line->position * 1000.0f),
@@ -56,7 +62,11 @@ void App_Debug_Task(void)
         (long) right->speedMmS,
         (int) motor->leftAppliedPermille,
         (int) motor->rightAppliedPermille,
-        line->lineDetected ? 1U : 0U);
+        line->lineDetected ? 1U : 0U,
+        imu->valid ? 1U : 0U,
+        (long) (imu->yawDegrees * 10.0f),
+        (long) (imu->gyroZDps * 10.0f),
+        (unsigned long) imuDiag->crcErrors);
     if (length > 0) {
         /* snprintf 返回期望长度，缓冲截断时必须限制实际发送长度。 */
         size_t sendLength = (size_t) length;

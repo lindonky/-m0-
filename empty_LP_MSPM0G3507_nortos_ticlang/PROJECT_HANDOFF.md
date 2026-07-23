@@ -26,7 +26,7 @@
 - 电机驱动：TB6612FNG；
 - 车辆结构：左右双直流电机差速车；
 - 当前默认循迹传感器：8 路模拟灰度/红外阵列；
-- 可选外设：AB 相编码器、IMU、软件 I2C SSD1306 OLED、调试 UART。
+- 可选外设：AB 相编码器、500 Hz 串口 IMU、软件 I2C SSD1306 OLED、调试 UART。
 
 工程路径：
 
@@ -46,7 +46,7 @@ C:\ti\mspm0_sdk_2_11_00_07
 选择引脚、不修改 SDK、不手改 SysConfig 生成文件的前提下，建立了完整的软件
 骨架，并实现了与具体引脚无关的车辆控制逻辑。
 
-文件变更规模：新建 48 个文件，修改原入口 `empty.c` 1 个文件；其中包含 23 个
+文件变更规模：新建 50 个文件，修改原入口 `empty.c` 1 个文件；其中包含 24 个
 C 源文件。`empty.syscfg` 尚未改动。
 
 主要工作如下：
@@ -60,11 +60,12 @@ C 源文件。`empty.syscfg` 尚未改动。
 7. 实现循迹方向环、弯道降速、差速混合和左右轮速度环；
 8. 实现 NoRTOS 毫秒任务调度和整车状态机；
 9. 实现 UART 调试协议骨架和整数缩放 CSV 遥测；
-10. 为 IMU 建立型号无关接口，并把江协科技 OLED V2.0 软件 I2C 驱动、字库和
-    绘图函数完整移植到 MSPM0G3507；
-11. 修改 `empty.c`，把全部模块接入持续运行的主循环；
-12. 使用工程实际 TI Arm Clang 编译全部源码并完成完整链接验证；
-13. 检查工程中不存在 MCU 睡眠、WFI 或低功耗策略调用。
+10. 移植 500 Hz 串口 IMU 协议，融合 Modbus CRC16、非阻塞 UART 环形缓冲、
+    角度回绕、超时、零偏标定和诊断计数；
+11. 把江协科技 OLED V2.0 软件 I2C 驱动、字库和绘图函数完整移植到 MSPM0G3507；
+12. 修改 `empty.c`，把全部模块接入持续运行的主循环；
+13. 使用工程实际 TI Arm Clang 编译全部源码并完成完整链接验证；
+14. 检查工程中不存在 MCU 睡眠、WFI 或低功耗策略调用。
 
 ## 4. 当前完成度总览
 
@@ -81,12 +82,13 @@ C 源文件。`empty.syscfg` 尚未改动。
 | 差速混合 | 已完成 | 是 | 超限时按比例缩放 |
 | 任务调度器 | 已完成 | 需 1ms ISR | 无休眠、无阻塞延时 |
 | 整车状态机 | 已完成基础状态 | 是 | 尚无环岛等比赛元素 |
-| UART 应用协议 | 已完成骨架 | 需 UART BSP | R/S/X/C/E 和 CSV |
-| UART 底层 | 未实现 | 否 | 需要 FIFO/中断或 DMA |
+| 调试 UART 应用协议 | 已完成骨架 | 需调试 UART BSP | R/S/X/C/E/G/I 和 CSV |
+| 调试 UART 底层 | 未实现 | 否 | 需要 FIFO/中断或 DMA |
+| IMU UART 底层 | 软件完成 | SysConfig 后可用 | RX/TX 环形缓冲、ISR、无阻塞等待 |
 | PWM/GPIO 底层 | 未实现 | 否 | 需要 SysConfig 符号 |
 | QEI 底层 | 未实现 | 否 | 需要左右 QEI 资源 |
 | ADC 底层 | 未实现 | 否 | 需要实际传感器通道 |
-| IMU 通用接口 | 已建立 | 否 | 未选定具体芯片 |
+| 500 Hz 串口 IMU | 协议完成 | UART 配置后可用 | 9 字节帧、CRC、回绕、超时、标定 |
 | SSD1306 OLED 驱动 | 软件移植完成 | GPIO 配置后可用 | 128×64、0x3C、软件 I2C、ACK 检测 |
 | 按键、电池、Flash | 未实现 | 否 | 后续增强项 |
 | 十字/环岛/停车线 | 未实现 | 否 | 依赛题规则开发 |
@@ -107,7 +109,7 @@ C 源文件。`empty.syscfg` 尚未改动。
 | 基础速度闭环 | 30% | 软件存在，硬件未接入、参数未整定 |
 | 基础连续线循迹 | 30% | 解算和控制存在，ADC/实车未验证 |
 | 比赛赛道元素 | 0% | 尚未取得具体赛题规则 |
-| IMU | 10% | 只有公共接口，型号驱动未写 |
+| IMU | 80% | 协议/UART BSP/诊断完成，缺实际引脚和上板数据验证 |
 | OLED | 80% | 驱动/字库完成，缺实际 SCL/SDA 和上板验证 |
 | 安全与诊断增强 | 20% | 有丢线/急停，缺欠压、堵转、超时等 |
 
@@ -168,7 +170,24 @@ forwardMmS + steeringMmS
   → TB6612 A/B 通道
 ```
 
-### 6.3 丢线处理
+### 6.3 IMU 链路
+
+```text
+115200 8N1 / 500 Hz / 9 字节帧
+  → UART RX ISR 排空硬件 FIFO
+  → 64 字节软件环形缓冲
+  → 1 ms 任务帧头同步
+  → Modbus CRC16
+  → 0.1° 和 0.1°/s 缩放
+  → 16 位角度回绕展开
+  → 零偏、超时和诊断
+  → IMU_GetData()
+```
+
+IMU 是独立 UART，不能与调试 CSV 串口共用。CRC 错误、协议头错误、软件缓冲
+溢出和主任务漏取帧都有独立计数，方便区分接线问题和调度负载问题。
+
+### 6.4 丢线处理
 
 短时间丢线时：
 
@@ -189,16 +208,19 @@ forwardMmS + steeringMmS
 
 | 周期 | 任务 | 设计原因 |
 |---:|---|---|
-| 1 ms | 循迹 ADC 帧处理 | 保证位置数据更新及时 |
+| 1 ms | IMU UART 解析、循迹 ADC 帧处理 | 接住 500 Hz IMU 并及时更新位置 |
 | 5 ms | 编码器、方向环、速度环、电机 | 200 Hz 控制周期 |
 | 10 ms | 状态和安全检查 | 状态逻辑无需进入高速 ISR |
 | 20 ms | UART 遥测 | 避免调试输出占用过多带宽 |
 
-ISR 只应：
+1 ms 定时器 ISR 只应：
 
 1. 判断并清除 1 ms 定时器中断标志；
 2. 调用 `BSP_Time_Tick1msFromISR()`；
 3. 立即退出。
+
+IMU UART ISR 只排空 RX FIFO到环形缓冲、填充 TX FIFO并退出；CRC、浮点缩放、
+偏航角和标定全部在 1 ms 主循环任务中处理。
 
 禁止在 ISR 中执行：
 
@@ -285,16 +307,20 @@ CAR_LINE_ELEMENT_THRESHOLD
 | X/x | 紧急停止并进入 FAULT |
 | C/c | 开始传感器标定 |
 | E/e | 结束传感器标定 |
+| G/g | 当前 IMU 相对偏航角清零 |
+| I/i | 开始 IMU 静止角速度零偏标定 |
 
 CSV 字段：
 
 ```text
 time_ms,state,line_position_x1000,left_speed_mm_s,right_speed_mm_s,
-left_pwm_permille,right_pwm_permille,line_detected
+left_pwm_permille,right_pwm_permille,line_detected,imu_valid,
+yaw_degrees_x10,gyro_z_dps_x10,imu_crc_errors
 ```
 
-当前只定义了应用协议，`bsp_uart.c` 尚未接入硬件。建议底层使用 TX/RX 环形缓冲，
-由中断或 DMA 搬运；不要在控制任务中等待 UART 发送完成。
+这里指的是给电脑输出 CSV 的调试 UART，`bsp_uart.c` 尚未接入硬件。IMU 使用另一个
+独立 UART，已经在 `bsp_imu_uart.c` 实现环形缓冲和中断服务。两路串口不能共用
+同一个外设实例；调试 UART 仍建议用中断或 DMA，控制任务不能等待发送完成。
 
 ## 12. 已完成的验证
 
@@ -302,11 +328,16 @@ left_pwm_permille,right_pwm_permille,line_detected
 
 验证内容：
 
-- 23 个 C 源文件使用 TI Arm Clang 编译成功且 `-Wall -Wextra` 零告警；
+- 24 个 C 源文件使用 TI Arm Clang 编译成功且 `-Wall -Wextra` 零告警；
 - 打开 `-Wall -Wextra`；
 - 使用 MSPM0G3507 的设备宏；
 - 与现有 SysConfig 生成对象、启动文件、DriverLib 和 libc 完整链接；
-- 主应用尚未调用 OLED，因此验证镜像仍约 9528 字节代码、869 字节 BSS；
+- 主应用已接入 IMU，但尚未调用 OLED；验证镜像约 11504 字节代码、967 字节 BSS；
+- 强制打开 `CAR_IMU_UART_READY=1` 并用 MSPM0G3507 UART0/IRQ 宏编译了真实
+  DriverLib 分支，确认环形缓冲、中断入口和 FIFO API 均可编译、完整链接；启用
+  硬件分支后的验证镜像约 12056 字节代码、1063 字节 BSS；
+- 协议向量验证得到配置命令 CRC=`0x00AD`，线上顺序=`AD 00`；正反方向
+  `int16_t` 角度回绕增量分别验证为 `+1/-1`；
 - 额外使用 OLED 初始化、字库、浮点显示、圆弧、Printf 和整屏刷新做了强制链接
   探针，约 22144 字节代码、1541 字节 BSS，证明 OLED 的数学库和格式化依赖完整；
 - 没有未解析符号和重复定义；
@@ -318,7 +349,8 @@ left_pwm_permille,right_pwm_permille,line_detected
 
 ### 第一优先级：让基础硬件产生可信数据
 
-1. 在 `empty.syscfg` 创建 1 ms 定时器、双 PWM、方向 GPIO、双 QEI、ADC、UART；
+1. 在 `empty.syscfg` 创建 1 ms 定时器、双 PWM、方向 GPIO、双 QEI、ADC、调试
+   UART 和独立 IMU UART；
 2. 填写所有 BSP TODO；
 3. 确定传感器实际通道数和顺序；
 4. 测量编码器每车轮一圈实际计数；
@@ -340,7 +372,7 @@ left_pwm_permille,right_pwm_permille,line_detected
 1. 根据赛题定义十字、直角、环岛、坡道和停车线；
 2. 为每种元素增加明确状态和超时保护；
 3. 加入电池电压、堵转和传感器超时保护；
-4. 如任务需要定角转向，再接 IMU；
+4. 上板验证 IMU 方向、CRC、零偏和角度回绕后，再用于定角转向；
 5. 最后加入 OLED 菜单和 Flash 参数保存。
 
 ## 14. 当前已知限制
@@ -354,11 +386,11 @@ left_pwm_permille,right_pwm_permille,line_detected
 - 循迹路口判断只是基于活跃通道数量的初步启发式；
 - 丢线恢复只使用最后方向，没有结合 IMU；
 - FAULT 清除策略较简单，后续可要求长按按键或明确复位命令；
-- UART 尚无缓冲区和错误统计；
+- 调试 UART 尚无缓冲区和错误统计；IMU UART 已有独立环形缓冲和错误计数；
 - 标定结果只保存在 RAM，上电后丢失；
 - OLED 已按 128×64 SSD1306/0x3C 移植，但尚未配置实际 GPIO，也未上板确认 ACK；
 - OLED 使用阻塞式软件 I2C，完整 1 KiB 刷新不能放进实时控制路径；
-- IMU 尚未绑定具体型号；
+- 串口 IMU 协议已完成，但尚未配置实际 UART 引脚，也没有上板确认 CRC 和方向；
 - 没有单元测试框架，验证主要为编译、链接和后续硬件测试。
 
 ## 15. 下一位开发者的推荐入口
@@ -371,8 +403,9 @@ left_pwm_permille,right_pwm_permille,line_detected
 4. `config/board_config.h`：记录接线；
 5. `bsp/bsp_*.c`：完成实际 DriverLib 调用；
 6. `app/app_car.c`：理解整车数据流；
-7. `control/line_control.c` 和 `control/speed_control.c`：开始调参；
-8. `drivers/line_sensor.c`：验证传感器方向和位置符号。
+7. `drivers/imu.c` 和 `bsp/bsp_imu_uart.c`：确认 IMU 协议和中断入口；
+8. `control/line_control.c` 和 `control/speed_control.c`：开始调参；
+9. `drivers/line_sensor.c`：验证传感器方向和位置符号。
 
 ## 16. 交接验收标准
 
@@ -388,5 +421,5 @@ left_pwm_permille,right_pwm_permille,line_detected
 - 左右速度闭环分别稳定；
 - 低速循迹不持续振荡；
 - 丢线超时能够可靠停机；
-- UART/OLED 故障不会阻塞控制环；
+- 调试 UART、IMU UART 或 OLED 故障不会阻塞控制环；
 - 运行代码中仍没有阻塞延时和低功耗入口。

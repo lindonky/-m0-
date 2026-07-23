@@ -11,6 +11,7 @@ app/app_car.o: ../app/app_car.c \
  C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/control/speed_control.h \
  C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/control/vehicle_mixer.h \
  C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/drivers/encoder.h \
+ C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/drivers/imu.h \
  C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/drivers/motor.h \
  C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/drivers/tb6612.h
 C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/app/app_car.h:
@@ -23,5 +24,6 @@ C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/drivers/line_sensor.
 C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/control/speed_control.h:
 C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/control/vehicle_mixer.h:
 C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/drivers/encoder.h:
+C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/drivers/imu.h:
 C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/drivers/motor.h:
 C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/drivers/tb6612.h:
