@@ -51,6 +51,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_init(void)
     /* Module-Specific Initializations*/
     SYSCFG_DL_SYSCTL_init();
     SYSCFG_DL_IMU_UART_init();
+    SYSCFG_DL_HC05_UART_init();
 }
 
 
@@ -60,10 +61,12 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
     DL_GPIO_reset(GPIOA);
     DL_GPIO_reset(GPIOB);
     DL_UART_Main_reset(IMU_UART_INST);
+    DL_UART_Main_reset(HC05_UART_INST);
 
     DL_GPIO_enablePower(GPIOA);
     DL_GPIO_enablePower(GPIOB);
     DL_UART_Main_enablePower(IMU_UART_INST);
+    DL_UART_Main_enablePower(HC05_UART_INST);
     delay_cycles(POWER_STARTUP_DELAY);
 }
 
@@ -74,6 +77,10 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
         GPIO_IMU_UART_IOMUX_TX, GPIO_IMU_UART_IOMUX_TX_FUNC);
     DL_GPIO_initPeripheralInputFunction(
         GPIO_IMU_UART_IOMUX_RX, GPIO_IMU_UART_IOMUX_RX_FUNC);
+    DL_GPIO_initPeripheralOutputFunction(
+        GPIO_HC05_UART_IOMUX_TX, GPIO_HC05_UART_IOMUX_TX_FUNC);
+    DL_GPIO_initPeripheralInputFunction(
+        GPIO_HC05_UART_IOMUX_RX, GPIO_HC05_UART_IOMUX_RX_FUNC);
 
 }
 
@@ -132,5 +139,44 @@ SYSCONFIG_WEAK void SYSCFG_DL_IMU_UART_init(void)
     DL_UART_Main_setTXFIFOThreshold(IMU_UART_INST, DL_UART_TX_FIFO_LEVEL_1_2_EMPTY);
 
     DL_UART_Main_enable(IMU_UART_INST);
+}
+static const DL_UART_Main_ClockConfig gHC05_UARTClockConfig = {
+    .clockSel    = DL_UART_MAIN_CLOCK_BUSCLK,
+    .divideRatio = DL_UART_MAIN_CLOCK_DIVIDE_RATIO_1
+};
+
+static const DL_UART_Main_Config gHC05_UARTConfig = {
+    .mode        = DL_UART_MAIN_MODE_NORMAL,
+    .direction   = DL_UART_MAIN_DIRECTION_TX_RX,
+    .flowControl = DL_UART_MAIN_FLOW_CONTROL_NONE,
+    .parity      = DL_UART_MAIN_PARITY_NONE,
+    .wordLength  = DL_UART_MAIN_WORD_LENGTH_8_BITS,
+    .stopBits    = DL_UART_MAIN_STOP_BITS_ONE
+};
+
+SYSCONFIG_WEAK void SYSCFG_DL_HC05_UART_init(void)
+{
+    DL_UART_Main_setClockConfig(HC05_UART_INST, (DL_UART_Main_ClockConfig *) &gHC05_UARTClockConfig);
+
+    DL_UART_Main_init(HC05_UART_INST, (DL_UART_Main_Config *) &gHC05_UARTConfig);
+    /*
+     * Configure baud rate by setting oversampling and baud rate divisors.
+     *  Target baud rate: 115200
+     *  Actual baud rate: 115211.52
+     */
+    DL_UART_Main_setOversampling(HC05_UART_INST, DL_UART_OVERSAMPLING_RATE_16X);
+    DL_UART_Main_setBaudRateDivisor(HC05_UART_INST, HC05_UART_IBRD_32_MHZ_115200_BAUD, HC05_UART_FBRD_32_MHZ_115200_BAUD);
+
+
+    /* Configure Interrupts */
+    DL_UART_Main_enableInterrupt(HC05_UART_INST,
+                                 DL_UART_MAIN_INTERRUPT_RX);
+
+    /* Configure FIFOs */
+    DL_UART_Main_enableFIFOs(HC05_UART_INST);
+    DL_UART_Main_setRXFIFOThreshold(HC05_UART_INST, DL_UART_RX_FIFO_LEVEL_ONE_ENTRY);
+    DL_UART_Main_setTXFIFOThreshold(HC05_UART_INST, DL_UART_TX_FIFO_LEVEL_1_2_EMPTY);
+
+    DL_UART_Main_enable(HC05_UART_INST);
 }
 

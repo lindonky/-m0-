@@ -7,7 +7,10 @@
 
 /**
  * @file line_sensor.h
- * @brief 模拟循迹阵列的标定、归一化、位置解算和基础元素标志。
+ * @brief 循迹阵列的标定、归一化、位置解算和基础元素标志。
+ *
+ * 当前硬件是地址复用数字模块，raw 为 BSP 映射出的 0/4095；它不是实际 ADC
+ * 灰度幅值。接口仍保留 uint16_t，方便未来更换模拟阵列而不改控制层。
  */
 
 /** 一帧循迹结果。position 左负右正，confidence 范围约 0~1。 */
@@ -23,7 +26,7 @@ typedef struct {
     bool junction;
 } LineSensor_Data;
 
-/** @brief 初始化 ADC 边界和默认 0~4095 标定范围。 */
+/** @brief 初始化底层采样边界和默认 0~4095 标定范围。 */
 void LineSensor_Init(void);
 
 /** @brief 尝试处理一帧新 ADC 数据；没有新帧时返回 false。 */

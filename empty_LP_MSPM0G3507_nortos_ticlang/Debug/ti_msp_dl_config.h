@@ -93,6 +93,22 @@ extern "C" {
 #define IMU_UART_BAUD_RATE                                              (115200)
 #define IMU_UART_IBRD_32_MHZ_115200_BAUD                                    (17)
 #define IMU_UART_FBRD_32_MHZ_115200_BAUD                                    (23)
+/* Defines for HC05_UART */
+#define HC05_UART_INST                                                     UART1
+#define HC05_UART_INST_FREQUENCY                                        32000000
+#define HC05_UART_INST_IRQHandler                               UART1_IRQHandler
+#define HC05_UART_INST_INT_IRQN                                   UART1_INT_IRQn
+#define GPIO_HC05_UART_RX_PORT                                             GPIOB
+#define GPIO_HC05_UART_TX_PORT                                             GPIOB
+#define GPIO_HC05_UART_RX_PIN                                      DL_GPIO_PIN_5
+#define GPIO_HC05_UART_TX_PIN                                      DL_GPIO_PIN_4
+#define GPIO_HC05_UART_IOMUX_RX                                  (IOMUX_PINCM18)
+#define GPIO_HC05_UART_IOMUX_TX                                  (IOMUX_PINCM17)
+#define GPIO_HC05_UART_IOMUX_RX_FUNC                   IOMUX_PINCM18_PF_UART1_RX
+#define GPIO_HC05_UART_IOMUX_TX_FUNC                   IOMUX_PINCM17_PF_UART1_TX
+#define HC05_UART_BAUD_RATE                                             (115200)
+#define HC05_UART_IBRD_32_MHZ_115200_BAUD                                   (17)
+#define HC05_UART_FBRD_32_MHZ_115200_BAUD                                   (23)
 
 
 
@@ -104,6 +120,7 @@ void SYSCFG_DL_initPower(void);
 void SYSCFG_DL_GPIO_init(void);
 void SYSCFG_DL_SYSCTL_init(void);
 void SYSCFG_DL_IMU_UART_init(void);
+void SYSCFG_DL_HC05_UART_init(void);
 
 bool SYSCFG_DL_saveConfiguration(void);
 bool SYSCFG_DL_restoreConfiguration(void);

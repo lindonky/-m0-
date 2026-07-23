@@ -28,8 +28,8 @@ Debug/makefile
 - 左右编码器 A/B 相接线；
 - 编码器参数已知为 13 PPR、1:30；仍需确认 QEI 是否四倍频及实测一圈计数；
 - 轮径；
-- 循迹传感器通道数、模拟/数字类型、左右排列；
-- 黑线相对背景是 ADC 更高还是更低；
+- 循迹模块 CH0~CH7 的物理左右排列；
+- 循迹模块 OUT 的有效电平，以及 5 V 供电时 OUT 的实际高电平；
 - 调试 UART TX/RX 接线；
 - 500 Hz IMU UART TX/RX 接线和模块串口电平；协议驱动已经完成；
 - OLED 的 SCL/SDA 引脚；驱动已按 128×64 SSD1306、地址 0x3C 移植；
@@ -118,49 +118,145 @@ examples/nortos/LP_MSPM0G3507/driverlib/timg_qei_mode
 5. 修改极性宏，使两侧向前都为正；
 6. 把实测一圈计数写入 `CAR_ENCODER_COUNTS_PER_WHEEL_REV`。
 
-## 6. 循迹 ADC
+## 6. 八路数字循迹模块
 
-对于 8 路模拟传感器，建议配置 ADC 序列：
+### 6.1 资料结论和接口含义
 
-- 通道顺序必须与物理最左到最右一致；
-- 可用定时器触发 ADC；
-- 首版可先中断读取，稳定后再使用 DMA；
-- `BSP_LineADC_Read()` 必须一次返回同一帧数据；
-- 没有新帧时返回 `false`，不能重复伪装成新数据。
-
-参考 SDK：
+这块模块确实节省 MCU 引脚，但不是“用四根线读八路 ADC 幅值”。PDF 给出的接口为：
 
 ```text
-adc12_sequence_conversion
-adc12_triggered_by_timer_event
-adc12_max_freq_dma
+AD0 = 地址最低位 A
+AD1 = 地址中间位 B
+AD2 = 地址最高位 C
+OUT = 当前所选通道比较后的数字 0/1
+
+CH0 = 000, CH1 = 001, ... , CH7 = 111
 ```
 
-验收：
+资料参考代码的结果数组也是 `uint8_t ir_results[8]`。因此每路只有检测/未检测两种
+状态，不能得到反射强度的真实 12 位 ADC 数值。当前 BSP 为兼容已有循迹算法，把
+数字结果映射为 0 或 4095；以后改成真正的模拟阵列时，上层接口可以保持不变。
 
-- 白底和黑线之间每路都有稳定跨度；
-- 通道顺序确实是左到右；
-- 电机运行时 ADC 噪声仍可接受；
-- 完成 C/E 标定后，黑线目标通道接近 1000，背景接近 0；
-- 线从左向右移动时 `position` 从负值连续变化到正值。
+### 6.2 SysConfig 和接线
+
+在 SysConfig 新建四个普通 GPIO：
+
+```text
+LINE_MUX_AD0：Digital Output，初始低
+LINE_MUX_AD1：Digital Output，初始低
+LINE_MUX_AD2：Digital Output，初始低
+LINE_MUX_OUT：Digital Input
+```
+
+接线：
+
+```text
+模块 AD0 -> LINE_MUX_AD0
+模块 AD1 -> LINE_MUX_AD1
+模块 AD2 -> LINE_MUX_AD2
+模块 OUT -> LINE_MUX_OUT
+模块 GND -> MSPM0 GND
+模块 5V  -> 5V 电源
+```
+
+模块按资料用 5 V 供电。MSPM0 GPIO 不耐受 5 V，连接 OUT 前必须测量其高电平。
+如果 OUT 接近 5 V，必须增加电平转换或合适分压；不能因为它是“数字输出”就直接
+接入。还要确认模块能把 MSPM0 输出的 3.3 V 可靠识别为 AD0~AD2 高电平。
+
+SysConfig 保存并成功生成四组 `*_PORT`/`*_PIN` 宏后，把 `board_config.h` 中：
+
+```c
+#define CAR_LINE_MUX_READY (0U)
+```
+
+改为：
+
+```c
+#define CAR_LINE_MUX_READY (1U)
+```
+
+如果自动生成名与上述实例名不同，只修改 `CAR_LINE_MUX_AD0_*`、`AD1_*`、`AD2_*`
+和 `OUT_*` 八个别名，不要手改 `ti_msp_dl_config.h/.c`。
+
+### 6.3 无阻塞扫描时序
+
+资料示例在每次选通后调用 `delay_us(100)`；当前工程明确不添加这种阻塞等待。
+调度器每 1 ms 调用一次 `BSP_LineADC_Read()`，其状态机按下面顺序工作：
+
+```text
+读取上一次已选通道 -> 保存 -> 选择下一通道 -> 立即返回
+```
+
+前七次返回 `false`，读完 CH7 后才把八路工作数组整体复制给上层并返回 `true`。
+这样地址建立时间约 1 ms，完整帧周期 8 ms，帧率约 125 Hz，而且上层不会看到
+半帧旧数据和半帧新数据。禁止在无时间间隔的紧循环中连续调用该函数。
+
+### 6.4 参数和验收
+
+默认参数：
+
+```c
+CAR_LINE_MUX_ACTIVE_LEVEL  = 1U  // OUT 高表示检测到目标线
+CAR_LINE_MUX_REVERSE_ORDER = 0U  // CH0 作为数组最左侧
+CAR_LINE_MUX_PSEUDO_ADC_MAX = 4095U
+```
+
+上板观察：
+
+- `BSP_LineADC_IsReady()` 应为 `true`；
+- `BSP_LineADC_GetFrameCount()` 每 8 ms 增加一次，约每秒 125；
+- `LineSensor_GetData()->raw[0..7]` 只能是 0 或 4095；
+- 目标线通道的 `normalized[]` 接近 1000，背景接近 0；
+- 线从左向右移动时 `position` 应从负值变到正值。
+
+如果黑白/有效状态完全相反，先把 `CAR_LINE_MUX_ACTIVE_LEVEL` 从 1 改为 0；如果位置
+左右相反，把 `CAR_LINE_MUX_REVERSE_ORDER` 从 0 改为 1。不要为了翻转方向改质心
+权重或 PID 符号。由于输入只有二值，位置和置信度分辨率会低于真实模拟 ADC 阵列，
+循迹 PID 必须重新实车整定。
 
 ## 7. 调试 UART
+
+调试链路当前通过 HC-05 做透明串口。`bsp_uart.c` 已实现 512 字节 TX、256 字节 RX
+环形缓冲、RX/TX FIFO 中断和错误统计。用户已在 SysConfig 完成当前分配：
 
 推荐配置：
 
 ```text
+实例名：HC05_UART
+外设：UART1
+TX：PB4
+RX：PB5
 115200 baud, 8 data bits, no parity, 1 stop bit
+TX + RX，无硬件流控
+FIFO：开启
+RX FIFO threshold：>= 1 entry
+中断：RX；TX 中断由 BSP 按发送队列状态动态开关
 ```
 
-在 `bsp/bsp_uart.c` 实现非阻塞接口：
+`board_config.h` 当前已经启用：
+
+```c
+#define CAR_HC05_UART_READY 1U
+```
+
+现有非阻塞接口：
 
 - `BSP_UART_TryWrite()`：只入队，队列满时返回 false；
+- `BSP_UART_TryWriteString()`：发送不包含结尾 `\0` 的字符串；
+- `BSP_UART_TryWriteByte()`：发送一个字节；
 - `BSP_UART_TryReadByte()`：RX 队列有数据才返回 true；
-- TX/RX 使用中断环形缓冲或 DMA；
+- `BSP_UART_Read()`：批量取走当前已经收到的数据；
+- 三组诊断计数可区分 RX 溢出、硬件错误和 TX 队列拒绝；
 - 不允许等待一个完整字符串发送完毕。
 
 上层命令：R 开始、S 停止、X 紧急停止、C/E 循迹标定、G 偏航角清零、
 I 开始 IMU 静止零偏标定。
+
+HC-05 数据模式波特率必须与 SysConfig 一致；常见模块出厂可能为 9600，而当前
+20 ms CSV 遥测推荐 115200。PB4 已被 UART1 TX 占用，后续 TB6612 PWM 不得再选
+PB4；PB5 位于板卡下方未焊接接口区域，需确认实物引出。如果自动生成文件里暂时找
+不到 `HC05_UART_*` 宏，保存 SysConfig 并执行一次 Clean + Build 让生成器刷新，不能
+手工补写生成文件。引脚和接线详见 `BOARD_PINOUT.md`。
 
 ## 8. 500 Hz 串口 IMU
 
@@ -188,9 +284,9 @@ IMU TX  -> MSPM0 的 IMU_UART_RX
 IMU RX  -> MSPM0 的 IMU_UART_TX
 ```
 
-参考例程使用 UART3、PB2 作为 MCU TX、PB3 作为 MCU RX，但本工程没有直接占用
-这两个脚，避免与 TB6612、编码器、ADC 或 OLED 接线冲突。确定整车引脚表后再选择。
-还需要确认模块串口电平是 3.3 V TTL；若模块 TX 是 5 V，不得直接接 MSPM0 RX。
+本工程当前已经配置 UART0、PA10 作为 MCU TX、PA11 作为 MCU RX；PA10/PA11 在
+LaunchPad 上涉及 J21/J22 到 XDS/BoosterPack 的路由，上板前必须检查跳线。还需要
+确认模块串口电平是 3.3 V TTL；若模块 TX 是 5 V，不得直接接 MSPM0 RX。
 
 ### 8.2 SysConfig
 
@@ -327,6 +423,9 @@ TB6612 的短时峰值能力当成可持续电流；调试时应限制占空比�
 - IMU UART 在 500 Hz 下不溢出且 CRC 稳定；
 - R/S/X/C/E/G/I 命令行为正确。
 
+灰度 GPIO 可以与通信阶段并行验收：先不接电机电源，观察完整帧计数约 125 Hz，
+逐个遮挡 CH0~CH7，确认只有对应数组元素变化，再验证左右顺序。
+
 ### 阶段 B：电机开环
 
 - 两轮分别正反转；
@@ -351,7 +450,7 @@ TB6612 的短时峰值能力当成可持续电流；调试时应限制占空比�
 
 ### 阶段 E：循迹
 
-- 标定正确；
+- OUT 有效电平、CH0~CH7 顺序和二值映射正确；
 - 位置符号正确；
 - 先只开 P，低速跑通；
 - 再加入 D 抑制摆动；

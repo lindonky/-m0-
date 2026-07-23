@@ -45,15 +45,45 @@
 #define CAR_ENCODER_RIGHT_B_GPIO_PORT       CAR_PIN_UNASSIGNED
 #define CAR_ENCODER_RIGHT_B_GPIO_PIN        CAR_PIN_UNASSIGNED
 
-/* 模拟循迹 ADC 通道，数组顺序必须是物理最左到最右。 */
-#define CAR_LINE_ADC_CH_0                    CAR_PIN_UNASSIGNED
-#define CAR_LINE_ADC_CH_1                    CAR_PIN_UNASSIGNED
-#define CAR_LINE_ADC_CH_2                    CAR_PIN_UNASSIGNED
-#define CAR_LINE_ADC_CH_3                    CAR_PIN_UNASSIGNED
-#define CAR_LINE_ADC_CH_4                    CAR_PIN_UNASSIGNED
-#define CAR_LINE_ADC_CH_5                    CAR_PIN_UNASSIGNED
-#define CAR_LINE_ADC_CH_6                    CAR_PIN_UNASSIGNED
-#define CAR_LINE_ADC_CH_7                    CAR_PIN_UNASSIGNED
+/*
+ * 八路灰度模块使用 3 位地址 + 1 位数字输出，并不直接输出八路模拟 ADC：
+ *   AD0=A/最低位，AD1=B，AD2=C/最高位，OUT=当前所选通道的比较器状态。
+ *
+ * 在 SysConfig 中添加 3 个普通推挽输出和 1 个数字输入，建议实例名分别为：
+ * LINE_MUX_AD0、LINE_MUX_AD1、LINE_MUX_AD2、LINE_MUX_OUT。确认实际接线并成功
+ * 生成以下 PORT/PIN 宏后，再把 READY 改成 1。模块接 5 V 供电，但连接 MSPM0
+ * 前必须实测 OUT 高电平不超过 3.3 V；MSPM0 GPIO 不能承受 5 V 输入。
+ */
+#ifndef CAR_LINE_MUX_READY
+#define CAR_LINE_MUX_READY                  (0U)
+#endif
+
+#if CAR_LINE_MUX_READY
+#ifndef CAR_LINE_MUX_AD0_PORT
+#define CAR_LINE_MUX_AD0_PORT               (LINE_MUX_AD0_PORT)
+#endif
+#ifndef CAR_LINE_MUX_AD0_PIN
+#define CAR_LINE_MUX_AD0_PIN                (LINE_MUX_AD0_PIN)
+#endif
+#ifndef CAR_LINE_MUX_AD1_PORT
+#define CAR_LINE_MUX_AD1_PORT               (LINE_MUX_AD1_PORT)
+#endif
+#ifndef CAR_LINE_MUX_AD1_PIN
+#define CAR_LINE_MUX_AD1_PIN                (LINE_MUX_AD1_PIN)
+#endif
+#ifndef CAR_LINE_MUX_AD2_PORT
+#define CAR_LINE_MUX_AD2_PORT               (LINE_MUX_AD2_PORT)
+#endif
+#ifndef CAR_LINE_MUX_AD2_PIN
+#define CAR_LINE_MUX_AD2_PIN                (LINE_MUX_AD2_PIN)
+#endif
+#ifndef CAR_LINE_MUX_OUT_PORT
+#define CAR_LINE_MUX_OUT_PORT               (LINE_MUX_OUT_PORT)
+#endif
+#ifndef CAR_LINE_MUX_OUT_PIN
+#define CAR_LINE_MUX_OUT_PIN                (LINE_MUX_OUT_PIN)
+#endif
+#endif
 
 /* 预留给其他传感器的硬件 I2C；当前这只 500 Hz IMU 实际使用独立 UART。 */
 #define CAR_I2C_INSTANCE_INDEX               CAR_PIN_UNASSIGNED
@@ -65,8 +95,8 @@
 
 /*
  * 500 Hz 串口 IMU：115200、8 数据位、无校验、1 停止位（8N1）。
- * 在 SysConfig 中建议把 UART 实例命名为 IMU_UART，并启用 RX 中断。参考例程
- * 使用 UART3/PB2(TX)/PB3(RX)，但这里不抢占引脚；确认整车接线后再把 READY 改为 1。
+ * 当前 SysConfig 实例名为 IMU_UART，使用 UART0、PA10 TX、PA11 RX，并启用
+ * FIFO 和 RX 中断。PA10/PA11 涉及 LaunchPad J21/J22 路由，上板前必须检查。
  * IMU 与调试终端必须使用不同 UART，防止二进制帧和 CSV/命令互相污染。
  */
 #ifndef CAR_IMU_UART_READY
@@ -120,13 +150,44 @@
 #endif
 
 
-/* 调试和后续在线调参 UART；不能与上面的 500 Hz IMU UART 共用。 */
-#define CAR_UART_INSTANCE_INDEX              CAR_PIN_UNASSIGNED
-#define CAR_UART_TX_GPIO_PORT                CAR_PIN_UNASSIGNED
-#define CAR_UART_TX_GPIO_PIN                 CAR_PIN_UNASSIGNED
-#define CAR_UART_RX_GPIO_PORT                CAR_PIN_UNASSIGNED
-#define CAR_UART_RX_GPIO_PIN                 CAR_PIN_UNASSIGNED
-#define CAR_UART_BAUD_RATE                   (115200UL)
+/*
+ * HC-05 蓝牙串口透传（调试、在线调参和手机命令）。
+ *
+ * HC-05 在“数据透传模式”下不需要专用通信协议：MCU 从 UART 发出的每个字节都会
+ * 通过蓝牙发送给手机，手机发来的字节也会原样出现在 UART RX。因此本工程只需要
+ * 一套可靠的全双工 UART 环形缓冲驱动，不需要给 HC-05 编写寄存器驱动。
+ *
+ * 在 SysConfig 中新增第二个 UART，并把实例名设为 HC05_UART：
+ *   - 必须与 IMU_UART 使用不同外设；当前 IMU 已占用 UART0；
+ *   - 8 数据位、无校验、1 停止位（8N1），无硬件流控；
+ *   - TX 和 RX 都启用，开启 FIFO，RX FIFO 阈值选择 >= 1 entry；
+ *   - 打开 RX interrupt；TX interrupt 会由 BSP 在有待发数据时动态开关；
+ *   - SysConfig 波特率必须与 HC-05 数据模式波特率一致。
+ *
+ * HC-05 常见出厂数据模式波特率是 9600，而本车 20 ms 一次的 CSV 遥测推荐
+ * 115200。若模块仍是 9600，请先在 AT 模式修改模块波特率，或者同时把 SysConfig
+ * 和下面的记录值改为 9600；只改本宏不会改变 UART 寄存器，实际硬件以 SysConfig
+ * 为准。当前 empty.syscfg 已配置 UART1、PB4 TX、PB5 RX。PB4 在板卡资料中也标为 PWM
+ * 候选，因此后续分配 TB6612 PWM 时必须避开 PB4；PB5 位于下方未焊接接口区域，
+ * 请确认实物已经引出并保证 HC-05 与 MSPM0 共地。
+ */
+#ifndef CAR_HC05_UART_READY
+#define CAR_HC05_UART_READY                 (1U)
+#endif
+#define CAR_HC05_UART_BAUD_RATE             (115200UL)
+
+#if CAR_HC05_UART_READY
+/* 若 SysConfig 实例不是 HC05_UART，只需要修改下面三个别名。 */
+#ifndef CAR_HC05_UART_INST
+#define CAR_HC05_UART_INST                  (HC05_UART_INST)
+#endif
+#ifndef CAR_HC05_UART_IRQN
+#define CAR_HC05_UART_IRQN                  (HC05_UART_INST_INT_IRQN)
+#endif
+#ifndef CAR_HC05_UART_IRQ_HANDLER
+#define CAR_HC05_UART_IRQ_HANDLER           HC05_UART_INST_IRQHandler
+#endif
+#endif
 
 /* 可选启停按键与电池电压 ADC；相关驱动尚未实现。 */
 #define CAR_KEY_GPIO_PORT                    CAR_PIN_UNASSIGNED
