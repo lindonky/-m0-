@@ -46,52 +46,75 @@
 #define CAR_ENCODER_RIGHT_B_GPIO_PIN        CAR_PIN_UNASSIGNED
 
 /*
- * 八路灰度模块使用 3 位地址 + 1 位数字输出，并不直接输出八路模拟 ADC：
- *   AD0=A/最低位，AD1=B，AD2=C/最高位，OUT=当前所选通道的比较器状态。
+ * 八路模拟循迹阵列：使用 ADC0 和 ADC1 的两个非重复序列采集真实 12 位模拟量。
+ * 推荐实例名为 LINE_ADC0 和 LINE_ADC1；默认分组为 ADC0/MEM0~2 三路、
+ * ADC1/MEM0~4 五路。两个序列都由软件触发，最后一个 MEM 完成时产生中断。
  *
- * 在 SysConfig 中添加 3 个普通推挽输出和 1 个数字输入，建议实例名分别为：
- * LINE_MUX_AD0、LINE_MUX_AD1、LINE_MUX_AD2、LINE_MUX_OUT。确认实际接线并成功
- * 生成以下 PORT/PIN 宏后，再把 READY 改成 1。模块接 5 V 供电，但连接 MSPM0
- * 前必须实测 OUT 高电平不超过 3.3 V；MSPM0 GPIO 不能承受 5 V 输入。
+ * SysConfig 尚未加入这两个 ADC 实例，因此 READY 必须保持 0。完成配置、确认
+ * ti_msp_dl_config.h 已生成 LINE_ADC0/1 的 INST、IRQN 和 IRQHandler 后再改为 1。
+ * 不要手改 SysConfig 自动生成文件；若实例名不同，只修改下面的别名。
  */
-#ifndef CAR_LINE_MUX_READY
-#define CAR_LINE_MUX_READY                  (0U)
+#ifndef CAR_LINE_ADC_READY
+#define CAR_LINE_ADC_READY                  (0U)
 #endif
 
-#if CAR_LINE_MUX_READY
-#ifndef CAR_LINE_MUX_AD0_PORT
-#define CAR_LINE_MUX_AD0_PORT               (LINE_MUX_AD0_PORT)
+#if CAR_LINE_ADC_READY
+#ifndef CAR_LINE_ADC0_INST
+#define CAR_LINE_ADC0_INST                  (LINE_ADC0_INST)
 #endif
-#ifndef CAR_LINE_MUX_AD0_PIN
-#define CAR_LINE_MUX_AD0_PIN                (LINE_MUX_AD0_PIN)
+#ifndef CAR_LINE_ADC0_IRQN
+#define CAR_LINE_ADC0_IRQN                  (LINE_ADC0_INST_INT_IRQN)
 #endif
-#ifndef CAR_LINE_MUX_AD1_PORT
-#define CAR_LINE_MUX_AD1_PORT               (LINE_MUX_AD1_PORT)
+#ifndef CAR_LINE_ADC0_IRQ_HANDLER
+#define CAR_LINE_ADC0_IRQ_HANDLER           LINE_ADC0_INST_IRQHandler
 #endif
-#ifndef CAR_LINE_MUX_AD1_PIN
-#define CAR_LINE_MUX_AD1_PIN                (LINE_MUX_AD1_PIN)
+
+#ifndef CAR_LINE_ADC1_INST
+#define CAR_LINE_ADC1_INST                  (LINE_ADC1_INST)
 #endif
-#ifndef CAR_LINE_MUX_AD2_PORT
-#define CAR_LINE_MUX_AD2_PORT               (LINE_MUX_AD2_PORT)
+#ifndef CAR_LINE_ADC1_IRQN
+#define CAR_LINE_ADC1_IRQN                  (LINE_ADC1_INST_INT_IRQN)
 #endif
-#ifndef CAR_LINE_MUX_AD2_PIN
-#define CAR_LINE_MUX_AD2_PIN                (LINE_MUX_AD2_PIN)
+#ifndef CAR_LINE_ADC1_IRQ_HANDLER
+#define CAR_LINE_ADC1_IRQ_HANDLER           LINE_ADC1_INST_IRQHandler
 #endif
-#ifndef CAR_LINE_MUX_OUT_PORT
-#define CAR_LINE_MUX_OUT_PORT               (LINE_MUX_OUT_PORT)
+
+/* 默认序列长度为 3+5；若改变分组，必须同步修改完成中断 IIDX 和 MASK。 */
+#ifndef CAR_LINE_ADC0_DONE_IIDX
+#define CAR_LINE_ADC0_DONE_IIDX             DL_ADC12_IIDX_MEM2_RESULT_LOADED
 #endif
-#ifndef CAR_LINE_MUX_OUT_PIN
-#define CAR_LINE_MUX_OUT_PIN                (LINE_MUX_OUT_PIN)
+#ifndef CAR_LINE_ADC0_DONE_INTERRUPT
+#define CAR_LINE_ADC0_DONE_INTERRUPT        DL_ADC12_INTERRUPT_MEM2_RESULT_LOADED
+#endif
+#ifndef CAR_LINE_ADC1_DONE_IIDX
+#define CAR_LINE_ADC1_DONE_IIDX             DL_ADC12_IIDX_MEM4_RESULT_LOADED
+#endif
+#ifndef CAR_LINE_ADC1_DONE_INTERRUPT
+#define CAR_LINE_ADC1_DONE_INTERRUPT        DL_ADC12_INTERRUPT_MEM4_RESULT_LOADED
 #endif
 #endif
 
-/* 预留给其他传感器的硬件 I2C；当前这只 500 Hz IMU 实际使用独立 UART。 */
-#define CAR_I2C_INSTANCE_INDEX               CAR_PIN_UNASSIGNED
-#define CAR_I2C_SCL_GPIO_PORT                CAR_PIN_UNASSIGNED
-#define CAR_I2C_SCL_GPIO_PIN                 CAR_PIN_UNASSIGNED
-#define CAR_I2C_SDA_GPIO_PORT                CAR_PIN_UNASSIGNED
-#define CAR_I2C_SDA_GPIO_PIN                 CAR_PIN_UNASSIGNED
+/*
+ * 为后续传感器预留硬件 I2C1：PB2=SCL、PB3=SDA。
+ * 这里仅记录已经通过 PinMux 验证的推荐资源，尚未要求 empty.syscfg 创建实例；
+ * 因此业务代码不能仅凭这些数值访问外设。SCL/SDA 必须上拉到 3.3 V。
+ */
+#define CAR_I2C_INSTANCE_INDEX               (1U)
+#define CAR_I2C_SCL_GPIO_PORT                (1U)  /* 1 = GPIOB. */
+#define CAR_I2C_SCL_GPIO_PIN                 (2U)  /* PB2. */
+#define CAR_I2C_SDA_GPIO_PORT                (1U)  /* 1 = GPIOB. */
+#define CAR_I2C_SDA_GPIO_PIN                 (3U)  /* PB3. */
 #define CAR_I2C_BITRATE_HZ                   (400000UL)
+
+/*
+ * 为后续串口模块预留 UART2：PB15=TX、PB16=RX。
+ * UART0 已给 IMU，UART1 已给 HC-05；本记录不表示 UART2 已在 SysConfig 中启用。
+ */
+#define CAR_SPARE_UART_INSTANCE_INDEX        (2U)
+#define CAR_SPARE_UART_TX_GPIO_PORT          (1U)  /* 1 = GPIOB. */
+#define CAR_SPARE_UART_TX_GPIO_PIN            (15U) /* PB15. */
+#define CAR_SPARE_UART_RX_GPIO_PORT          (1U)  /* 1 = GPIOB. */
+#define CAR_SPARE_UART_RX_GPIO_PIN            (16U) /* PB16. */
 
 /*
  * 500 Hz 串口 IMU：115200、8 数据位、无校验、1 停止位（8N1）。

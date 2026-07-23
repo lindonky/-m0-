@@ -214,7 +214,9 @@ Excel 共列出 PA0~PA31 和 PB0~PB27，合计 60 个 GPIO 名称：
 | TB6612 PWM | 两个 PWM 输出 | 未配置 | 优先同一定时器两个 CC，20 kHz |
 | TB6612 方向/STBY | 五个普通 GPIO | 未配置 | STBY 上电默认低 |
 | 左右编码器 | 四个 QEI 信号 | 未配置 | 两轮共需 A/B 四路，不要只按 J12 三脚假定足够 |
-| 八路循迹 | AD0/AD1/AD2 输出 + OUT 输入 | 驱动完成、GPIO 未配置 | 四线轮询，OUT 每路只有 0/1 |
+| 八路模拟循迹 | ADC0 三路 + ADC1 五路 | 驱动完成、原工程 SysConfig 未配置 | 八路真实 12 位 ADC；推荐引脚已经过独立 SysConfig 验证 |
+| 预留 I2C | I2C1 / PB2 SCL / PB3 SDA | 方案已验证、暂不加入原工程 | 给后续硬件 I2C 外设；外接 3.3 V 上拉 |
+| 预留 UART | UART2 / PB15 TX / PB16 RX | 方案已验证、暂不加入原工程 | 给后续串口模块；UART3 仍未使用 |
 | 1 ms 时基 | 一个定时器 | 未配置 | ISR 只调用 `BSP_Time_Tick1msFromISR()` |
 
 ## 7. 面向循迹小车的候选分配思路
@@ -266,38 +268,58 @@ PB12, PB4, PB1, PA28, PA31, PB20, PB13
 
 图片只证明接口位置标注为 PWM 候选，不证明任意两脚都能组成同一个定时器。
 
-### 7.3 八路数字循迹模块
+### 7.3 八路真实模拟循迹阵列
 
-根据模块 PDF，接口并不是八路模拟 ADC。模块内部用三位地址选择八路比较器结果：
+当前硬件是八路独立模拟输出，不再使用地址线或单路数字输出。推荐把八路按车辆物理
+最左侧到最右侧接成下面的顺序；该 3+5 分组已经与现有 UART0、UART1、SWD，以及
+预留 I2C1、UART2 一起通过 SysConfig 1.28.0 的校验和代码生成。
+
+| `raw[]` 索引 | ADC 序列位置 | ADC 输入 | MCU 引脚 | 板级注意事项 |
+|---:|---|---|---|---|
+| 0（最左） | ADC0 MEM0 | ADC0.2 | PA25 | BoosterPack，推荐直接使用 |
+| 1 | ADC0 MEM1 | ADC0.3 | PA24 | BoosterPack，推荐直接使用 |
+| 2 | ADC0 MEM2 | ADC0.7 | PA22 | 使用前必须断开或确认 J16 板载光线传感器 |
+| 3 | ADC1 MEM0 | ADC1.0 | PA15 | DAC 未启用时可作 ADC1.0 |
+| 4 | ADC1 MEM1 | ADC1.2 | PA17 | BoosterPack，推荐直接使用 |
+| 5 | ADC1 MEM2 | ADC1.4 | PB17 | BoosterPack，推荐直接使用 |
+| 6 | ADC1 MEM3 | ADC1.5 | PB18 | BoosterPack，推荐直接使用 |
+| 7（最右） | ADC1 MEM4 | ADC1.6 | PB19 | BoosterPack，推荐直接使用 |
+
+这套选择避开了 PA0/PA1 特殊开漏脚、PA2~PA6 晶振脚、PA18 默认 BSL/按键路由、
+PA19/PA20 SWD、PA21/PA23 VREF、PA16 SW2 路由、PB24 板载温度传感器和 PB25 未焊
+SMA 位置。代价是使用 PA22，因此必须处理 J16。
+
+软件按以下方式工作：ADC0 软件触发 MEM0~MEM2 非重复序列，ADC1 软件触发
+MEM0~MEM4 非重复序列；两个末尾 MEM 完成中断都到达后，1 ms 任务才提交一帧完整
+数据，并立即触发下一帧。ISR 只置位完成标志，没有延时、忙等和低功耗等待。正常时
+完整帧率约为 1 kHz。若两组在超时窗口内没有共同完成，驱动会非阻塞地重启两组序列，
+并通过诊断计数暴露故障。
+
+所有模拟输出必须保持在 0~3.3 V，模块与 MCU 必须共地。若模块以 5 V 供电，不代表
+模拟输出一定安全；接入 MCU 前应逐路测量最大输出电压。模拟线应远离 TB6612 PWM、
+电机线和大电流回流路径。
+
+### 7.4 预留通信接口
+
+以下两组已在完整候选配置中通过 PinMux 验证，但当前原工程尚未实际添加，目的是避免
+现在占用运行时资源，同时为后续扩展留下确定接口：
 
 ```text
-AD0 = 地址最低位 A
-AD1 = 地址中间位 B
-AD2 = 地址最高位 C
-OUT = 当前所选通道的数字输出
+SPARE_I2C = I2C1
+SCL = PB2
+SDA = PB3
 
-CH0 = 000, CH1 = 001, ... , CH7 = 111
+SPARE_UART = UART2
+TX = PB15
+RX = PB16
 ```
 
-因此 MCU 只需要三个普通数字输出和一个数字输入，共四根信号线。用户还没有指定
-最终 GPIO，建议在 SysConfig 中创建以下实例并选择无板载冲突的普通 GPIO：
+PB2/PB3 是 BoosterPack 标准 I2C 位置，SCL/SDA 必须上拉到 3.3 V，不能上拉到 5 V。
+PB15/PB16 均为 BoosterPack 引脚且无已知板载负载，作为备用 UART 比 PA8/PA9、
+PB6/PB7 更干净。当前资源关系是 UART0 给 IMU、UART1 给 HC-05、UART2 预留，
+UART3 仍未使用。
 
-```text
-LINE_MUX_AD0：Digital Output，初始低
-LINE_MUX_AD1：Digital Output，初始低
-LINE_MUX_AD2：Digital Output，初始低
-LINE_MUX_OUT：Digital Input
-```
-
-模块资料要求 5 V 供电，而 MSPM0 GPIO 只允许 3.3 V 逻辑。接 OUT 前必须用万用表或
-示波器测量其高电平；若接近 5 V，增加电平转换或按输入电流/阈值正确计算的分压，
-不能直接接 MCU。AD0~AD2 从 MCU 输出 3.3 V 时，还需确认模块能可靠识别为高电平。
-
-软件每 1 ms 读取一路并切换到下一地址，8 ms 才提交完整八路帧，约 125 帧/秒，
-没有阻塞延时。若 CH0 实际在车辆右侧，设置 `CAR_LINE_MUX_REVERSE_ORDER=1`；若
-OUT 有效电平相反，修改 `CAR_LINE_MUX_ACTIVE_LEVEL`，不要改质心公式。
-
-### 7.4 左右编码器
+### 7.5 左右编码器
 
 Excel 在 QEI Interface 列出 PA29、PA30、PB14，且 J12 未焊接；两只 AB 相编码器
 实际需要四路输入。因此流程应是：
@@ -307,7 +329,7 @@ Excel 在 QEI Interface 列出 PA29、PA30、PB14，且 J12 未焊接；两只 A
 3. 若板载 QEI Interface 不足四路，再从普通引出脚选择剩余复用脚；
 4. 最后确认最大边沿频率、计数方向和溢出扩展方案。
 
-### 7.5 OLED 和 TB6612 普通 GPIO
+### 7.6 OLED 和 TB6612 普通 GPIO
 
 OLED 软件 I2C、AIN1/AIN2/BIN1/BIN2/STBY 对外设复用要求较低，应在 UART、PWM、
 QEI 和 ADC 分配完成后再选普通 GPIO。选择原则：
@@ -323,13 +345,14 @@ QEI 和 ADC 分配完成后再选普通 GPIO。选择原则：
 1. 固定保留 PA19/PA20、供电、GND、NRST 和特殊脚；
 2. 锁定现有 IMU UART0/PA10/PA11，并检查 J21/J22；
 3. 保留并验证 HC-05 UART1/PB4/PB5，确认 PB5 实物引出并从 PWM 候选中移除 PB4；
-4. 为两只编码器选择两个 QEI A/B 组合；
-5. 为 TB6612 选择两路 PWM，同时保留 1 ms 定时器；
-6. 为循迹模块分配 AD0/AD1/AD2/OUT 四个普通 GPIO；
-7. 最后分配 TB6612 五个 GPIO 和 OLED 两个 GPIO；
-8. 把每个最终选择写入下面的正式记录表和 `config/board_config.h`；
-9. 保存 SysConfig，核对生成宏，Clean + Build；
-10. 用万用表/示波器/逻辑分析仪逐项上板确认。
+4. 固定八路 ADC 的 3+5 分组，处理 PA22/J16，并验证每路输入不超过 3.3 V；
+5. 保留 I2C1/PB2/PB3 和 UART2/PB15/PB16，避免后续无接口可用；
+6. 为两只编码器选择两个 QEI A/B 组合；
+7. 为 TB6612 选择两路 PWM，同时保留 1 ms 定时器；
+8. 最后分配 TB6612 五个普通 GPIO 和 OLED 两个软件 I2C GPIO；
+9. 把每个最终选择写入下面的正式记录表和 `config/board_config.h`；
+10. 保存 SysConfig，核对生成宏，Clean + Build；
+11. 用万用表/示波器/逻辑分析仪逐项上板确认。
 
 ## 9. 最终接线记录表（待逐项填写）
 
@@ -337,8 +360,8 @@ QEI 和 ADC 分配完成后再选普通 GPIO。选择原则：
 |---|---|---|---|---|---|
 | IMU | TX -> IMU RX | PA10 | UART0 TX | J21 待确认 | 待验证 |
 | IMU | RX <- IMU TX | PA11 | UART0 RX | J22 待确认 | 待验证 |
-| HC-05 | TX -> HC-05 RX | PB4 | UART1 / `HC05_UART` TX | BoosterPack | 待验证 |
-| HC-05 | RX <- HC-05 TX | PB5 | UART1 / `HC05_UART` RX | 下方未焊接区 | 待验证 |
+| HC-05 | TX -> HC-05 RX | PB4 | UART1 / `HC05_UART` TX | BoosterPack | 生成/构建通过，待实物 |
+| HC-05 | RX <- HC-05 TX | PB5 | UART1 / `HC05_UART` RX | 下方未焊接区 | 生成/构建通过，待实物 |
 | TB6612 | PWMA | 待定 | PWM/CC 待定 | 待定 | 待验证 |
 | TB6612 | PWMB | 待定 | PWM/CC 待定 | 待定 | 待验证 |
 | TB6612 | AIN1/AIN2 | 待定 | GPIO | 待定 | 待验证 |
@@ -346,8 +369,16 @@ QEI 和 ADC 分配完成后再选普通 GPIO。选择原则：
 | TB6612 | STBY | 待定 | GPIO | 待定 | 待验证 |
 | 左编码器 | A/B | 待定 | QEI 待定 | 待定 | 待验证 |
 | 右编码器 | A/B | 待定 | QEI 待定 | 待定 | 待验证 |
-| 循迹 | AD0/AD1/AD2 | 待定 | 三个普通 GPIO 输出 | 待定 | 待验证 |
-| 循迹 | OUT | 待定 | 普通 GPIO 输入 | 先测高电平 | 待验证 |
+| 循迹 CH0（最左） | 模拟输出 | PA25 | ADC0.2 / MEM0 | BoosterPack | PinMux 已验证，待实物 |
+| 循迹 CH1 | 模拟输出 | PA24 | ADC0.3 / MEM1 | BoosterPack | PinMux 已验证，待实物 |
+| 循迹 CH2 | 模拟输出 | PA22 | ADC0.7 / MEM2 | J16 | 需断开/确认 J16 |
+| 循迹 CH3 | 模拟输出 | PA15 | ADC1.0 / MEM0 | BoosterPack | PinMux 已验证，待实物 |
+| 循迹 CH4 | 模拟输出 | PA17 | ADC1.2 / MEM1 | BoosterPack | PinMux 已验证，待实物 |
+| 循迹 CH5 | 模拟输出 | PB17 | ADC1.4 / MEM2 | BoosterPack | PinMux 已验证，待实物 |
+| 循迹 CH6 | 模拟输出 | PB18 | ADC1.5 / MEM3 | BoosterPack | PinMux 已验证，待实物 |
+| 循迹 CH7（最右） | 模拟输出 | PB19 | ADC1.6 / MEM4 | BoosterPack | PinMux 已验证，待实物 |
+| 预留 I2C | SCL/SDA | PB2/PB3 | I2C1 / `SPARE_I2C` | BoosterPack | PinMux 已验证，尚未加入原工程 |
+| 预留 UART | TX/RX | PB15/PB16 | UART2 / `SPARE_UART` | BoosterPack | PinMux 已验证，尚未加入原工程 |
 | OLED | SCL/SDA | 待定 | 普通 GPIO | 4.7 kΩ 到 3.3 V | 待验证 |
 | 系统 | 1 ms tick | 无外接 | Timer 待定 | 无 | 待验证 |
 
@@ -358,7 +389,10 @@ QEI 和 ADC 分配完成后再选普通 GPIO。选择原则：
 - [ ] PA10/PA11 与 J21/J22 的物理路由正确；
 - [ ] 同一 UART 的 TX/RX 确实属于同一外设实例；
 - [ ] PWM 的定时器和 CC 通道与 QEI、1 ms tick 不冲突；
-- [ ] 灰度 OUT 高电平不超过 3.3 V，CH0~CH7 物理左右顺序正确；
+- [ ] 八路灰度模拟输出逐路测得 0~3.3 V，不把 5 V 信号直接送入 ADC；
+- [ ] ADC0 MEM0~2、ADC1 MEM0~4 的顺序与车辆最左到最右一致；
+- [ ] PA22 的 J16 板载光线传感器连接已经处理；
+- [ ] ADC0 MEM2 与 ADC1 MEM4 完成中断均启用，诊断计数没有异常增长；
 - [ ] 板载按键、LED、光线/温度传感器跳线已处理；
 - [ ] 外设逻辑电平为 3.3 V，所有模块共地；
 - [ ] SysConfig 没有红色冲突并成功保存；
@@ -373,7 +407,10 @@ QEI 和 ADC 分配完成后再选普通 GPIO。选择原则：
 - 原始表格：`C:/Users/林~/Downloads/LP-MSPM0G3507引脚功能表.xlsx`，Sheet1 A1:E61；
 - 板卡图片：用户提供的 LP-MSPM0G3507 BoosterPack 接口功能图；
 - 当前工程：`empty.syscfg`，IMU UART0/PA10/PA11，HC-05 UART1/PB4/PB5；
-- 八路灰度资料：用户提供的 `八路灰度模块.pdf`，确认三位地址加单路数字 OUT；
+- 历史灰度资料：用户提供的 `八路灰度模块.pdf`；该数字复用模块已经弃用，不再作为当前接线依据；
+- ADC 序列参考：SDK `examples/nortos/LP_MSPM0G3507/driverlib/adc12_sequence_conversion`；
+- 完整候选 PinMux 验证：`work/verify_adc_syscfg/verify_adc_and_reserved_io.syscfg`，
+  包含 ADC0 三路、ADC1 五路、I2C1、UART0/1/2 和 SWD，SysConfig 校验与代码生成通过；
 - SDK 示例：`examples/nortos/LP_MSPM0G3507/bsl/`
   `bsl_host_mcu_to_mspm0g1x0x_g3x0x_target_uart/bsl_host_mcu_uart.syscfg`，
   其中 UART1 使用 PB6 TX/PB7 RX。

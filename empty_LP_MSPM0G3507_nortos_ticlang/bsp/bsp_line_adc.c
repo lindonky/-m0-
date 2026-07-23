@@ -1,15 +1,17 @@
 /*
- * 八路地址复用数字循迹模块适配层。
+ * 八路真实模拟循迹阵列的 ADC BSP。
  *
- * 模块用 AD2:AD0 选择 CH0~CH7，并从 OUT 输出所选通道的数字比较结果。资料示例
- * 每切换一路阻塞 100 us；本工程不阻塞控制环，而是利用既有 1 ms 传感器任务：
- * - 本次调用读取上一次已经选好的通道；
- * - 随后立刻切换到下一通道；
- * - 下一次 1 ms 调用再读取，因此地址建立时间远大于资料建议的 100 us；
- * - 扫描完 8 路才向上层提交一帧，帧率为 125 Hz。
+ * 设计目标：
+ * 1. ADC0、ADC1 各运行一个软件触发的非重复序列；
+ * 2. 两个序列的末尾 MEM 中断只置完成标志，不在 ISR 中做算法；
+ * 3. 1 ms 主任务只有在两组都完成后才读取并提交完整八路帧；
+ * 4. 提交后立即重新使能并触发下一帧，全程没有轮询等待或延时；
+ * 5. 任一 ADC 长时间未完成时自动重启两个序列，避免半帧永久卡死。
  *
- * 模块只能提供 0/1，不是八路模拟 ADC。为了保持现有 LineSensor 标定、极性和
- * 加权质心接口，数字状态在这里映射成 0 或 4095 的伪原始值。
+ * 默认映射（可以在 SysConfig 中改变“MEM 对应输入通道”，但数组顺序必须保持）：
+ *   ADC0 MEM0..2 -> values[0..2]
+ *   ADC1 MEM0..4 -> values[3..7]
+ * values[0] 必须是车辆最左侧探头，values[7] 必须是最右侧探头。
  */
 #include "bsp/bsp_line_adc.h"
 
@@ -17,117 +19,149 @@
 
 #include "config/board_config.h"
 
-#if CAR_LINE_MUX_READY
+#if CAR_LINE_ADC_READY
 #include "ti_msp_dl_config.h"
 #endif
 
 _Static_assert(CAR_LINE_SENSOR_COUNT == 8U,
-               "The address-multiplexed line sensor requires exactly 8 channels");
-_Static_assert(CAR_LINE_MUX_ACTIVE_LEVEL <= 1U,
-               "CAR_LINE_MUX_ACTIVE_LEVEL must be 0 or 1");
-_Static_assert(CAR_LINE_MUX_REVERSE_ORDER <= 1U,
-               "CAR_LINE_MUX_REVERSE_ORDER must be 0 or 1");
+               "The line sensor driver requires exactly eight channels");
+_Static_assert(CAR_LINE_ADC0_CHANNEL_COUNT > 0U,
+               "ADC0 sequence must contain at least one channel");
+_Static_assert(CAR_LINE_ADC1_CHANNEL_COUNT > 0U,
+               "ADC1 sequence must contain at least one channel");
+_Static_assert((CAR_LINE_ADC0_CHANNEL_COUNT + CAR_LINE_ADC1_CHANNEL_COUNT) ==
+                   CAR_LINE_SENSOR_COUNT,
+               "ADC0 and ADC1 channel counts must add up to eight");
+_Static_assert(CAR_LINE_ADC0_CHANNEL_COUNT <= 12U,
+               "ADC0 sequence exceeds the twelve ADC memory slots");
+_Static_assert(CAR_LINE_ADC1_CHANNEL_COUNT <= 12U,
+               "ADC1 sequence exceeds the twelve ADC memory slots");
+_Static_assert(CAR_LINE_ADC_REVERSE_ORDER <= 1U,
+               "CAR_LINE_ADC_REVERSE_ORDER must be 0 or 1");
+_Static_assert(CAR_LINE_ADC_TIMEOUT_POLLS > 0U,
+               "ADC timeout must be at least one poll");
 
-static uint16_t g_workingFrame[CAR_LINE_SENSOR_COUNT];
-static uint8_t g_selectedChannel;
+static volatile bool g_adc0Done;
+static volatile bool g_adc1Done;
+static bool g_conversionActive;
+static uint32_t g_waitPolls;
 static uint32_t g_frameCount;
+static uint32_t g_restartCount;
+static volatile uint32_t g_unexpectedIrqCount;
 
-#if CAR_LINE_MUX_READY
-/** @brief 写单个推挽地址引脚；三个地址位可以位于不同 GPIO 端口。 */
-static void write_address_pin(GPIO_Regs *port, uint32_t pin, bool high)
+#if CAR_LINE_ADC_READY
+/** @brief 清除旧状态并尽可能同时启动两个 ADC 序列。 */
+static void start_conversion_pair(void)
 {
-    if (high) {
-        DL_GPIO_setPins(port, pin);
-    } else {
-        DL_GPIO_clearPins(port, pin);
-    }
-}
+    g_adc0Done = false;
+    g_adc1Done = false;
+    g_waitPolls = 0U;
 
-/** @brief 按 AD2=C、AD1=B、AD0=A 的二进制表选择 CH0~CH7。 */
-static void select_channel(uint8_t channel)
-{
-    write_address_pin(CAR_LINE_MUX_AD0_PORT, CAR_LINE_MUX_AD0_PIN,
-                      (channel & 0x01U) != 0U);
-    write_address_pin(CAR_LINE_MUX_AD1_PORT, CAR_LINE_MUX_AD1_PIN,
-                      (channel & 0x02U) != 0U);
-    write_address_pin(CAR_LINE_MUX_AD2_PORT, CAR_LINE_MUX_AD2_PIN,
-                      (channel & 0x04U) != 0U);
-}
+    DL_ADC12_clearInterruptStatus(CAR_LINE_ADC0_INST,
+                                  CAR_LINE_ADC0_DONE_INTERRUPT);
+    DL_ADC12_clearInterruptStatus(CAR_LINE_ADC1_INST,
+                                  CAR_LINE_ADC1_DONE_INTERRUPT);
 
-/** @brief 把“目标线是否被检测”转换成符合上层黑线极性约定的伪 ADC 值。 */
-static uint16_t target_detected_to_raw(bool targetDetected)
-{
     /*
-     * normalize() 在“目标为黑且黑线原始值低”或“目标为白且黑线原始值高”时
-     * 会反相。因此这两种配置要把目标状态映射为低值，其余配置映射为高值。
+     * 两条语句之间只有很少的 CPU 周期差；相比 1 ms 控制周期，可以视为同一帧。
+     * ADC0 和 ADC1 独立工作，因此不会发生八路逐个软件切换造成的长时间偏差。
      */
-    const bool normalizationWillInvert =
-        ((CAR_LINE_ACTIVE_DARK != 0U) == (CAR_LINE_BLACK_IS_LOW_RAW != 0U));
+    DL_ADC12_startConversion(CAR_LINE_ADC0_INST);
+    DL_ADC12_startConversion(CAR_LINE_ADC1_INST);
+    g_conversionActive = true;
+}
 
-    if (normalizationWillInvert) {
-        return targetDetected ? 0U : CAR_LINE_MUX_PSEUDO_ADC_MAX;
+/** @brief 超时后重新武装两个非重复序列；不等待硬件完成。 */
+static void restart_conversion_pair(void)
+{
+    DL_ADC12_disableConversions(CAR_LINE_ADC0_INST);
+    DL_ADC12_disableConversions(CAR_LINE_ADC1_INST);
+    DL_ADC12_enableConversions(CAR_LINE_ADC0_INST);
+    DL_ADC12_enableConversions(CAR_LINE_ADC1_INST);
+    g_restartCount++;
+    start_conversion_pair();
+}
+
+/** @brief 把两个 ADC 的连续 MEM 结果映射到车辆左到右数组。 */
+static void copy_completed_frame(uint16_t values[CAR_LINE_SENSOR_COUNT])
+{
+    uint32_t adcIndex;
+    uint32_t outputIndex;
+    uint16_t sample;
+
+    for (adcIndex = 0U; adcIndex < CAR_LINE_ADC0_CHANNEL_COUNT; ++adcIndex) {
+        outputIndex = adcIndex;
+        if (CAR_LINE_ADC_REVERSE_ORDER) {
+            outputIndex = (CAR_LINE_SENSOR_COUNT - 1U) - outputIndex;
+        }
+        sample = DL_ADC12_getMemResult(CAR_LINE_ADC0_INST,
+                                      (DL_ADC12_MEM_IDX) adcIndex);
+        values[outputIndex] = sample;
     }
-    return targetDetected ? CAR_LINE_MUX_PSEUDO_ADC_MAX : 0U;
+
+    for (adcIndex = 0U; adcIndex < CAR_LINE_ADC1_CHANNEL_COUNT; ++adcIndex) {
+        outputIndex = CAR_LINE_ADC0_CHANNEL_COUNT + adcIndex;
+        if (CAR_LINE_ADC_REVERSE_ORDER) {
+            outputIndex = (CAR_LINE_SENSOR_COUNT - 1U) - outputIndex;
+        }
+        sample = DL_ADC12_getMemResult(CAR_LINE_ADC1_INST,
+                                      (DL_ADC12_MEM_IDX) adcIndex);
+        values[outputIndex] = sample;
+    }
 }
 #endif
 
 void BSP_LineADC_Init(void)
 {
-    uint32_t index;
-
-    g_selectedChannel = 0U;
+    g_adc0Done = false;
+    g_adc1Done = false;
+    g_conversionActive = false;
+    g_waitPolls = 0U;
     g_frameCount = 0U;
-    for (index = 0U; index < CAR_LINE_SENSOR_COUNT; ++index) {
-        g_workingFrame[index] = 0U;
-    }
+    g_restartCount = 0U;
+    g_unexpectedIrqCount = 0U;
 
-#if CAR_LINE_MUX_READY
-    /* GPIO 方向和 PinMux 必须已经由 SYSCFG_DL_init() 完成；这里只选择首通道。 */
-    select_channel(0U);
+#if CAR_LINE_ADC_READY
+    /* SYSCFG_DL_init() 已完成 ADC 时钟、序列、MEM、模拟引脚和中断源配置。 */
+    NVIC_ClearPendingIRQ(CAR_LINE_ADC0_IRQN);
+    NVIC_ClearPendingIRQ(CAR_LINE_ADC1_IRQN);
+    NVIC_EnableIRQ(CAR_LINE_ADC0_IRQN);
+    NVIC_EnableIRQ(CAR_LINE_ADC1_IRQN);
+    start_conversion_pair();
 #endif
 }
 
 bool BSP_LineADC_Read(uint16_t values[CAR_LINE_SENSOR_COUNT])
 {
-#if CAR_LINE_MUX_READY
-    uint32_t index;
-    uint32_t outputLevel;
-    uint8_t outputIndex;
-    bool electricalHigh;
-    bool targetDetected;
-
     if (values == NULL) return false;
 
-    outputLevel = DL_GPIO_readPins(CAR_LINE_MUX_OUT_PORT,
-                                   CAR_LINE_MUX_OUT_PIN);
-    electricalHigh = ((outputLevel & CAR_LINE_MUX_OUT_PIN) != 0U);
-    targetDetected = (electricalHigh == (CAR_LINE_MUX_ACTIVE_LEVEL != 0U));
-
-    outputIndex = g_selectedChannel;
-    if (CAR_LINE_MUX_REVERSE_ORDER) {
-        outputIndex = (uint8_t) ((CAR_LINE_SENSOR_COUNT - 1U) - outputIndex);
-    }
-    g_workingFrame[outputIndex] = target_detected_to_raw(targetDetected);
-
-    g_selectedChannel++;
-    if (g_selectedChannel < CAR_LINE_SENSOR_COUNT) {
-        /* 提前切换地址，让硬件在下一次 1 ms 调用前充分稳定。 */
-        select_channel(g_selectedChannel);
+#if CAR_LINE_ADC_READY
+    if (!g_conversionActive) {
+        start_conversion_pair();
         return false;
     }
 
-    /* 八路都完成后一次复制，保证上层不会看到半帧新、半帧旧的数据。 */
-    for (index = 0U; index < CAR_LINE_SENSOR_COUNT; ++index) {
-        values[index] = g_workingFrame[index];
+    if (!(g_adc0Done && g_adc1Done)) {
+        g_waitPolls++;
+        if (g_waitPolls >= CAR_LINE_ADC_TIMEOUT_POLLS) {
+            restart_conversion_pair();
+        }
+        return false;
     }
+
+    /* 两组都完成后才读结果，保证上层收到的是完整八路帧。 */
+    copy_completed_frame(values);
     g_frameCount++;
-    g_selectedChannel = 0U;
-    select_channel(0U);
+    g_conversionActive = false;
+
+    /* 非重复序列完成后需要重新允许转换，再触发下一帧。 */
+    DL_ADC12_enableConversions(CAR_LINE_ADC0_INST);
+    DL_ADC12_enableConversions(CAR_LINE_ADC1_INST);
+    start_conversion_pair();
     return true;
 #else
     uint32_t index;
 
-    if (values == NULL) return false;
     for (index = 0U; index < CAR_LINE_SENSOR_COUNT; ++index) {
         values[index] = 0U;
     }
@@ -137,14 +171,42 @@ bool BSP_LineADC_Read(uint16_t values[CAR_LINE_SENSOR_COUNT])
 
 bool BSP_LineADC_IsReady(void)
 {
-#if CAR_LINE_MUX_READY
+#if CAR_LINE_ADC_READY
     return true;
 #else
     return false;
 #endif
 }
 
-uint32_t BSP_LineADC_GetFrameCount(void)
+uint32_t BSP_LineADC_GetFrameCount(void) { return g_frameCount; }
+uint32_t BSP_LineADC_GetRestartCount(void) { return g_restartCount; }
+uint32_t BSP_LineADC_GetUnexpectedIrqCount(void)
 {
-    return g_frameCount;
+    return g_unexpectedIrqCount;
 }
+
+#if CAR_LINE_ADC_READY
+void CAR_LINE_ADC0_IRQ_HANDLER(void)
+{
+    const DL_ADC12_IIDX pending =
+        DL_ADC12_getPendingInterrupt(CAR_LINE_ADC0_INST);
+
+    if (pending == CAR_LINE_ADC0_DONE_IIDX) {
+        g_adc0Done = true;
+    } else if (pending != (DL_ADC12_IIDX) 0) {
+        g_unexpectedIrqCount++;
+    }
+}
+
+void CAR_LINE_ADC1_IRQ_HANDLER(void)
+{
+    const DL_ADC12_IIDX pending =
+        DL_ADC12_getPendingInterrupt(CAR_LINE_ADC1_INST);
+
+    if (pending == CAR_LINE_ADC1_DONE_IIDX) {
+        g_adc1Done = true;
+    } else if (pending != (DL_ADC12_IIDX) 0) {
+        g_unexpectedIrqCount++;
+    }
+}
+#endif

@@ -54,18 +54,15 @@
 #define CAR_ENCODER_LEFT_POLARITY          (+1)
 #define CAR_ENCODER_RIGHT_POLARITY         (+1)
 
-/*
- * 八路复用数字循迹模块参数。BSP 把数字“检测/未检测”映射为 0/4095，继续复用
- * 标定、归一化和质心算法；这不代表模块能够输出真实的模拟灰度幅值。
- */
+/* 八路真实模拟循迹阵列；公开数组始终按车辆物理最左侧到最右侧排列。 */
 #define CAR_LINE_SENSOR_COUNT              (8U)
 #define CAR_LINE_ACTIVE_DARK               (1U)    /* 1: black line gives stronger normalized value. */
 #define CAR_LINE_BLACK_IS_LOW_RAW          (1U)    /* Change to 0 if black produces a larger ADC value. */
-/* OUT 等于此电平时，表示当前通道检测到了目标线；上板观察后可在 0/1 间切换。 */
-#define CAR_LINE_MUX_ACTIVE_LEVEL          (1U)
-/* 若模块 CH0 实际位于车辆右侧，把此项改为 1，保证公开数组仍按物理左到右排列。 */
-#define CAR_LINE_MUX_REVERSE_ORDER         (0U)
-#define CAR_LINE_MUX_PSEUDO_ADC_MAX        (4095U)
+#define CAR_LINE_ADC0_CHANNEL_COUNT        (3U)    /* ADC0 MEM0~2 -> sensor 0~2. */
+#define CAR_LINE_ADC1_CHANNEL_COUNT        (5U)    /* ADC1 MEM0~4 -> sensor 3~7. */
+#define CAR_LINE_ADC_MAX_VALUE             (4095U)
+#define CAR_LINE_ADC_TIMEOUT_POLLS         (5U)    /* LineSensor_Sample() is called every 1 ms. */
+#define CAR_LINE_ADC_REVERSE_ORDER         (0U)    /* Set to 1 only if all eight wires are reversed. */
 #define CAR_LINE_DETECT_SUM_MIN            (600U)
 #define CAR_LINE_ELEMENT_THRESHOLD         (650U)
 #define CAR_LINE_LOST_STOP_MS              (500U)

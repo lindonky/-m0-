@@ -2,8 +2,8 @@
  * 循迹阵列算法。
  *
  * 处理流程：底层原始值 → 每通道 0~1000 归一化 → 左右位置权重 → 加权质心。
- * 归一化后“目标线”强度大、背景强度小。当前八路复用模块只给数字 0/1，BSP
- * 映射为 0/4095；若以后换回真正模拟阵列，本层算法和公开接口不需要修改。
+ * 归一化后“目标线”强度大、背景强度小。当前 BSP 提交八路真实 12 位 ADC 结果，
+ * 因此每路黑白跨度、噪声和器件差异都由独立标定值消除。
  */
 #include "drivers/line_sensor.h"
 #include "bsp/bsp_line_adc.h"
@@ -40,7 +40,7 @@ void LineSensor_Init(void)
     g_calibrating = false;
     g_lastPosition = 0.0f;
     for (index = 0U; index < CAR_LINE_SENSOR_COUNT; ++index) {
-        /* 未标定前使用 12 位满量程；兼容真实 ADC 和数字模块的伪原始值。 */
+        /* 未标定前使用 12 位满量程；实际使用前仍建议执行一次动态黑白标定。 */
         g_minimum[index] = 0U;
         g_maximum[index] = 4095U;
     }

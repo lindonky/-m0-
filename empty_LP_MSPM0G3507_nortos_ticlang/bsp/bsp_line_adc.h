@@ -8,32 +8,37 @@
 
 /**
  * @file bsp_line_adc.h
- * @brief 八路地址复用数字循迹模块的非阻塞采样边界。
+ * @brief 八路真实模拟循迹阵列的双 ADC 非阻塞采样边界。
  *
- * 文件名保留 ADC 是为了不破坏现有上层接口；实际模块只输出数字 0/1。BSP 将其
- * 映射为 0/4095，使现有归一化和加权质心算法可以继续使用。
+ * 默认用 ADC0 的三通道序列和 ADC1 的五通道序列组成一帧。两个末尾 MEM 中断
+ * 只置标志，主任务在两组均完成后一次提交八个 12 位结果。
  */
 
 /**
- * @brief 清空扫描状态并选择 CH0。
- * @note 必须在 SYSCFG_DL_init() 之后调用；函数不包含任何阻塞延时。
+ * @brief 清空诊断状态、开启两个 ADC 中断并触发第一帧。
+ * @note 必须在 SYSCFG_DL_init() 之后调用；不包含阻塞等待或延时。
  */
 void BSP_LineADC_Init(void);
 
 /**
- * @brief 读取当前通道、切换到下一通道，并在 CH0~CH7 全部完成后复制一帧。
- * @param values 输出数组，必须按物理最左到最右排列。
- * @return true=本次形成并复制了完整新帧；false=仍在扫描或硬件尚未配置。
+ * @brief 尝试取得一帧八路模拟量，并立即触发下一帧。
+ * @param values 输出数组，索引 0~7 必须对应车辆物理最左到最右。
+ * @return true=本次复制了完整新帧；false=转换尚未完成、正在重启或硬件未配置。
  *
- * 当前应用每 1 ms 调用一次，因此每个地址有约 1 ms 建立时间，完整帧率为 125 Hz。
- * 不要在无时间间隔的紧循环中反复调用本函数。
+ * 应由当前 1 ms 传感器任务周期调用；禁止用 while 紧循环等待 true。
  */
 bool BSP_LineADC_Read(uint16_t values[CAR_LINE_SENSOR_COUNT]);
 
-/** @brief 查询真实 GPIO 分支是否已通过 CAR_LINE_MUX_READY 启用。 */
+/** @brief 查询 CAR_LINE_ADC_READY 是否已启用真实 ADC 分支。 */
 bool BSP_LineADC_IsReady(void);
 
-/** @brief 返回自初始化以来完成的八通道整帧数量，便于调试器观察。 */
+/** @brief 自初始化以来成功提交的完整八路帧数量。 */
 uint32_t BSP_LineADC_GetFrameCount(void);
+
+/** @brief 两个 ADC 未在超时窗口内共同完成而被重启的次数。 */
+uint32_t BSP_LineADC_GetRestartCount(void);
+
+/** @brief ADC IRQ 收到非预期 IIDX 的累计次数。 */
+uint32_t BSP_LineADC_GetUnexpectedIrqCount(void);
 
 #endif /* BSP_LINE_ADC_H */

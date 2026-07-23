@@ -25,7 +25,7 @@
 - 工程类型：NoRTOS；
 - 电机驱动：TB6612FNG；
 - 车辆结构：左右双直流电机差速车；
-- 当前循迹传感器：八路数字灰度模块，使用 AD2/AD1/AD0 地址选择和单路 OUT；
+- 当前循迹传感器：八路独立模拟灰度阵列，使用 ADC0 三路和 ADC1 五路；
 - 可选外设：AB 相编码器、500 Hz 串口 IMU、软件 I2C SSD1306 OLED、调试 UART。
 
 工程路径：
@@ -55,8 +55,8 @@ C 源文件。`empty.syscfg` 尚未改动。
 2. 为 TB6612 实现双通道正反转、滑行、短刹车和 STBY 控制逻辑；
 3. 实现电机有符号占空比、极性、限幅、死区、斜坡和紧急停止；
 4. 实现编码器增量、速度、RPM、累计距离和低通滤波；
-5. 实现八路循迹逐通道标定、归一化和加权位置解算；针对实际模块增加
-   `AD2/AD1/AD0 + OUT` 四线非阻塞扫描 BSP；
+5. 实现八路真实 ADC 的逐通道标定、归一化和加权位置解算；使用 ADC0/ADC1
+   双序列完成中断组成完整帧，包含超时重启与诊断计数；
 6. 实现通用 PID，包含输出限幅、积分限幅、抗饱和和微分滤波；
 7. 实现循迹方向环、弯道降速、差速混合和左右轮速度环；
 8. 实现 NoRTOS 毫秒任务调度和整车状态机；
@@ -69,6 +69,8 @@ C 源文件。`empty.syscfg` 尚未改动。
 14. 检查工程中不存在 MCU 睡眠、WFI 或低功耗策略调用。
 15. 核对并接入用户已完成的 HC-05 SysConfig 配置：UART1、PB4 TX、PB5 RX、
     115200 8N1、FIFO、RX `>= 1 entry` 中断。
+16. 因硬件改为八路独立模拟灰度，移除原数字复用方案，重写双 ADC 非阻塞 BSP，
+    并通过完整候选 SysConfig 验证 ADC 3+5 分组、备用 I2C1 和备用 UART2 可共存。
 
 ## 4. 当前完成度总览
 
@@ -78,7 +80,7 @@ C 源文件。`empty.syscfg` 尚未改动。
 | TB6612 上层逻辑 | 已完成 | BSP 完成后可用 | A/B 通道、方向、刹车、滑行 |
 | 电机控制 | 已完成 | BSP 完成后可用 | 极性、限幅、斜坡、死区、安全停机 |
 | 编码器数学处理 | 已完成 | QEI BSP 完成后可用 | 速度、RPM、距离、滤波 |
-| 循迹算法 | 已完成首版 | 四个 GPIO 配置后可用 | 二值映射、质心、丢线方向 |
+| 循迹算法 | 已完成首版 | 两个 ADC 序列配置后可用 | 真实模拟量、标定、质心、丢线 |
 | 通用 PID | 已完成 | 是 | 仍需实车调参 |
 | 左右速度闭环 | 已完成首版 | 编码器接入后可用 | 默认参数只是起点 |
 | 循迹方向闭环 | 已完成首版 | 传感器接入后可用 | 默认使用 PD |
@@ -86,11 +88,11 @@ C 源文件。`empty.syscfg` 尚未改动。
 | 任务调度器 | 已完成 | 需 1ms ISR | 无休眠、无阻塞延时 |
 | 整车状态机 | 已完成基础状态 | 是 | 尚无环岛等比赛元素 |
 | HC-05 调试 UART 应用协议 | 已完成 | 等待上板验证 | R/S/X/C/E/G/I 和 CSV |
-| HC-05 调试 UART 底层 | 软件和 SysConfig 已接入 | 等待重新生成/构建 | UART1、PB4/PB5、FIFO/ISR |
+| HC-05 调试 UART 底层 | 软件、SysConfig、构建已通过 | 等待上板验证 | UART1、PB4/PB5、FIFO/ISR |
 | IMU UART 底层 | 软件完成 | SysConfig 后可用 | RX/TX 环形缓冲、ISR、无阻塞等待 |
 | PWM/GPIO 底层 | 未实现 | 否 | 需要 SysConfig 符号 |
 | QEI 底层 | 未实现 | 否 | 需要左右 QEI 资源 |
-| 八路循迹 GPIO BSP | 软件完成 | SysConfig 后可用 | 四线复用、无阻塞延时、8 ms/帧 |
+| 八路循迹 ADC BSP | 软件完成 | SysConfig 后可用 | ADC0 3路 + ADC1 5路、非阻塞完整帧 |
 | 500 Hz 串口 IMU | 协议完成 | UART 配置后可用 | 9 字节帧、CRC、回绕、超时、标定 |
 | SSD1306 OLED 驱动 | 软件移植完成 | GPIO 配置后可用 | 128×64、0x3C、软件 I2C、ACK 检测 |
 | 按键、电池、Flash | 未实现 | 否 | 后续增强项 |
@@ -107,10 +109,10 @@ C 源文件。`empty.syscfg` 尚未改动。
 |---|---:|---|
 | 软件架构和模块接口 | 100% | 分层、接口和主循环已建立并链接通过 |
 | 与引脚无关的基础算法 | 90% | 首版已实现，仍缺实车数据验证 |
-| MSPM0 外设/SysConfig 接入 | 25% | IMU 和 HC-05 已分配；灰度四 GPIO 等仍待分配 |
+| MSPM0 外设/SysConfig 接入 | 30% | IMU/HC-05 已分配；八路 ADC 方案已验证、待用户配置 |
 | 电机和编码器台架验证 | 0% | 尚未连接实物 |
 | 基础速度闭环 | 30% | 软件存在，硬件未接入、参数未整定 |
-| 基础连续线循迹 | 45% | 四线扫描、解算和控制存在，缺 GPIO 和实车验证 |
+| 基础连续线循迹 | 50% | 双 ADC BSP、解算和控制存在，缺原工程配置与实车验证 |
 | 比赛赛道元素 | 0% | 尚未取得具体赛题规则 |
 | IMU | 80% | 协议/UART BSP/诊断完成，缺实际引脚和上板数据验证 |
 | OLED | 80% | 驱动/字库完成，缺实际 SCL/SDA 和上板验证 |
@@ -145,9 +147,9 @@ PID、循迹和整车状态机。
 ### 6.1 循迹方向链路
 
 ```text
-AD2/AD1/AD0 选择 CH0~CH7
-  → OUT 读取当前通道数字比较结果 0/1
-  → BSP 映射成兼容值 0 或 4095
+ADC0 MEM0~2 + ADC1 MEM0~4 软件触发
+  → 两个末尾 MEM 完成中断分别置位
+  → 两组均完成后提交八路真实 12 位结果
   → 每通道黑白标定
   → 0~1000 归一化强度
   → 加权质心位置 position(-1~+1)
@@ -163,15 +165,10 @@ AD2/AD1/AD0 选择 CH0~CH7
 
 正 `steeringMmS` 表示右转，差速混合会提高左轮目标速度并降低右轮目标速度。
 
-本模块虽然节省引脚，但不能提供每路真实 ADC 灰度幅值。PDF 中的参考变量也是
-`uint8_t ir_results[8]`，每路只有 0/1。现有 `uint16_t raw[8]` 接口继续保留，BSP
-把数字结果映射为 0/4095，以便复用标定、黑白极性、质心、丢线和 PID 上层逻辑；
-因此调试时看到 0/4095 是正常现象，不应把它理解为 12 位 ADC 测量值。
-
-扫描采用非阻塞状态机，而不是照搬资料中的八次 `delay_us(100)`：1 ms 任务每次读取
-上一次已选通道，再切到下一通道并立即返回。每路地址约有 1 ms 建立时间，扫描八次后
-才原子提交一整帧，所以完整帧周期为 8 ms、帧率约 125 Hz，上层不会收到半新半旧的
-数组。`BSP_LineADC_Read()` 在中间七次返回 `false`，完成 CH7 时才返回 `true`。
+当前模块输出连续模拟电压，`raw[0..7]` 是真实 0~4095 ADC 结果。默认 ADC0 负责
+数组 0~2，ADC1 负责数组 3~7；两个序列都完成后才提交，避免跨 ADC 半新半旧。
+每次提交后立即重启下一帧，1 ms 任务下目标帧率接近 1 kHz。任一 ADC 连续五次
+任务轮询仍未完成时，BSP 会重新武装两个序列并增加重启诊断计数，不会阻塞主循环。
 
 ### 6.2 速度闭环链路
 
@@ -223,7 +220,7 @@ IMU 是独立 UART，不能与调试 CSV 串口共用。CRC 错误、协议头�
 
 | 周期 | 任务 | 设计原因 |
 |---:|---|---|
-| 1 ms | IMU UART 解析、循迹复用通道扫描 | 接住 500 Hz IMU；灰度每 8 ms 形成完整帧 |
+| 1 ms | IMU UART 解析、领取循迹 ADC 完整帧 | 接住 500 Hz IMU；灰度目标约 1 kHz 帧率 |
 | 5 ms | 编码器、方向环、速度环、电机 | 200 Hz 控制周期 |
 | 10 ms | 状态和安全检查 | 状态逻辑无需进入高速 ISR |
 | 20 ms | UART 遥测 | 避免调试输出占用过多带宽 |
@@ -301,8 +298,7 @@ CAR_MOTOR_LEFT_POLARITY
 CAR_MOTOR_RIGHT_POLARITY
 CAR_ENCODER_LEFT_POLARITY
 CAR_ENCODER_RIGHT_POLARITY
-CAR_LINE_MUX_ACTIVE_LEVEL
-CAR_LINE_MUX_REVERSE_ORDER
+CAR_LINE_ADC_REVERSE_ORDER
 CAR_LINE_BLACK_IS_LOW_RAW
 CAR_LINE_DETECT_SUM_MIN
 CAR_LINE_ELEMENT_THRESHOLD
@@ -370,9 +366,17 @@ PB4 在板卡资料中同时是 PWM 候选，后续给 TB6612 分配 PWM 时必�
 - 在用户加入 HC-05 SysConfig 之前，曾对 `IMU READY=1 / HC-05 READY=0` 配置执行
   原工程增量构建，
   `bsp_uart.c`、`bsp_imu_uart.c`、`app_debug.c` 和整车最终链接均成功；
-- 八路复用驱动分别在 `CAR_LINE_MUX_READY=0` 安全分支、临时 GPIO 宏映射后的
-  `READY=1` DriverLib 分支，以 TI Arm Clang、`-Wall -Wextra -Werror` 编译通过；
-- 灰度扫描实现中没有阻塞延时；每 1 ms 只读一路并切换地址，八路完成后再提交；
+- 八路模拟 ADC 驱动分别在 `CAR_LINE_ADC_READY=0` 安全分支、临时 ADC0/ADC1 宏
+  映射后的 `READY=1` 分支，以 TI Arm Clang、`-Wall -Wextra -Werror` 编译通过；
+- 建立独立验证 SysConfig，确认推荐八路 ADC、现有 UART0/UART1、SWD、预留
+  I2C1/PB2/PB3 和 UART2/PB15/PB16 可以同时生成且无 PinMux 冲突；
+- 使用该验证配置实际生成的 `LINE_ADC0/1` 宏再次编译真实 DriverLib 分支成功；
+- ADC ISR 只置完成标志，主任务在两组均完成后提交；实现中没有阻塞等待或延时；
+- 真实原工程构建已触发 SysConfig 重新生成并完整链接成功；生成结果明确为
+  `HC05_UART_INST=UART1`、`UART1_IRQHandler`、RX=GPIOB/PB5、TX=GPIOB/PB4，
+  115200 baud、FIFO 和 RX one-entry threshold；
+- 链接映射中 `UART0_IRQHandler`（IMU）与 `UART1_IRQHandler`（HC-05）同时存在，
+  地址不同且无重复定义；
 - 没有未解析符号和重复定义；
 - 没有 MCU 休眠或低功耗入口。
 
@@ -383,13 +387,15 @@ PB4 在板卡资料中同时是 PWM 候选，后续给 TB6612 分配 PWM 时必�
 ### 第一优先级：让基础硬件产生可信数据
 
 1. 在 `empty.syscfg` 继续创建 1 ms 定时器、双 PWM、方向 GPIO、双 QEI，以及
-   `LINE_MUX_AD0/AD1/AD2` 三个数字输出和 `LINE_MUX_OUT` 数字输入；IMU UART0 和
-   HC-05 UART1 已分配；
-2. 填写所有 BSP TODO；
-3. 确认模块 CH0~CH7 的物理左右顺序以及 OUT 有效电平；
-4. 测量编码器每车轮一圈实际计数；
-5. 验证左右电机和编码器极性；
-6. 用串口/Watch 确认时间、灰度完整帧计数和编码器数据连续更新。
+   `LINE_ADC0` 三通道序列和 `LINE_ADC1` 五通道序列；IMU UART0 和 HC-05 UART1
+   已分配；
+2. ADC 按 PA25、PA24、PA22、PA15、PA17、PB17、PB18、PB19 从最左到最右配置；
+3. 保留 I2C1/PB2/PB3 和 UART2/PB15/PB16，不再把它们分配给普通 GPIO；
+4. 填写所有 BSP TODO；
+5. 按传感器最左到最右确认八个 MEM 顺序、黑白电压范围，并断开 PA22 的 J16 负载；
+6. 测量编码器每车轮一圈实际计数；
+7. 验证左右电机和编码器极性；
+8. 用串口/Watch 确认时间、灰度完整帧计数和编码器数据连续更新。
 
 ### 第二优先级：完成基础闭环
 
@@ -413,19 +419,19 @@ PB4 在板卡资料中同时是 PWM 候选，后续给 TB6612 分配 PWM 时必�
 
 - MG513 标称堵转电流约 2.8 A，明显高于 TB6612 常用约 1.2 A/通道连续能力；
   虽然峰值规格可能短时覆盖，但堵转会快速发热，必须避免长时间堵转并考虑硬件保护；
-- PWM/GPIO/QEI BSP 仍是安全占位，当前下载后不会驱动电机；八路灰度扫描软件已完成，
-  但因 `CAR_LINE_MUX_READY=0` 暂不操作未分配的四个 GPIO；
+- PWM/GPIO/QEI BSP 仍是安全占位，当前下载后不会驱动电机；八路模拟 ADC 软件已完成，
+  但因 `CAR_LINE_ADC_READY=0` 暂不访问尚未加入原 SysConfig 的 ADC0/ADC1；
 - 没有硬件数据就无法验证循迹极性和权重方向；
 - 默认 PID 未经实车调节；
 - 编码器速度滤波系数固定在源码中；
 - 循迹路口判断只是基于活跃通道数量的初步启发式；
 - 丢线恢复只使用最后方向，没有结合 IMU；
 - FAULT 清除策略较简单，后续可要求长按按键或明确复位命令；
-- HC-05 已分配 UART1/PB4/PB5，但尚需重新触发 SysConfig 生成、完整构建和上板收发；
+- HC-05 已分配 UART1/PB4/PB5且完整构建通过，但尚未连接实物验证透传收发；
 - PB4 已被 HC-05 TX 占用，后续 TB6612 PWM 不能再选 PB4；PB5 的物理引出需确认；
-- 灰度模块仅输出每路比较后的 0/1，细腻程度和置信度分辨率低于真实八路模拟 ADC；
-- 灰度模块按资料使用 5 V 供电，必须先实测 OUT 高电平不超过 MSPM0 的 3.3 V
-  输入范围；若为 5 V，必须加电平转换或合适的分压，不能直接连接；
+- 八路模拟输出尚未上板测量；每路都必须限制在 0~3.3 V，不能把 5 V 模拟量直接
+  输入 MSPM0 ADC；
+- 推荐 ADC 方案只有 PA22 涉及板载光线传感器，使用前必须确认/断开 J16；
 - 标定结果只保存在 RAM，上电后丢失；
 - OLED 已按 128×64 SSD1306/0x3C 移植，但尚未配置实际 GPIO，也未上板确认 ACK；
 - OLED 使用阻塞式软件 I2C，完整 1 KiB 刷新不能放进实时控制路径；
@@ -438,15 +444,16 @@ PB4 在板卡资料中同时是 PWM 候选，后续给 TB6612 分配 PWM 时必�
 首次接手时建议按以下顺序阅读：
 
 1. `PROJECT_HANDOFF.md`：了解整体状态和工程方法；
-2. `BOARD_PINOUT.md`：查 LaunchPad 引脚、跳线、冲突和当前占用；
-3. `CAR_PORTING.md`：完成硬件资源；
-4. `config/car_config.h`：核对车辆参数；
-5. `config/board_config.h`：记录接线；
-6. `bsp/bsp_*.c`：完成实际 DriverLib 调用；
-7. `app/app_car.c`：理解整车数据流；
-8. `drivers/imu.c` 和 `bsp/bsp_imu_uart.c`：确认 IMU 协议和中断入口；
-9. `control/line_control.c` 和 `control/speed_control.c`：开始调参；
-10. `drivers/line_sensor.c`：验证传感器方向和位置符号。
+2. `PIN_ALLOCATION_RECOMMENDATION.md`：按已验证方案配置八路 ADC，并保留 I2C/UART；
+3. `BOARD_PINOUT.md`：查 LaunchPad 引脚、跳线、冲突和当前占用；
+4. `CAR_PORTING.md`：完成硬件资源；
+5. `config/car_config.h`：核对车辆参数；
+6. `config/board_config.h`：记录接线；
+7. `bsp/bsp_*.c`：完成实际 DriverLib 调用；
+8. `app/app_car.c`：理解整车数据流；
+9. `drivers/imu.c` 和 `bsp/bsp_imu_uart.c`：确认 IMU 协议和中断入口；
+10. `control/line_control.c` 和 `control/speed_control.c`：开始调参；
+11. `drivers/line_sensor.c`：验证传感器方向和位置符号。
 
 ## 16. 交接验收标准
 

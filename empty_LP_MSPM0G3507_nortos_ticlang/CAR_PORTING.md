@@ -118,101 +118,136 @@ examples/nortos/LP_MSPM0G3507/driverlib/timg_qei_mode
 5. 修改极性宏，使两侧向前都为正；
 6. 把实测一圈计数写入 `CAR_ENCODER_COUNTS_PER_WHEEL_REV`。
 
-## 6. 八路数字循迹模块
+## 6. 八路真实模拟循迹阵列
 
-### 6.1 资料结论和接口含义
+### 6.1 软件结构
 
-这块模块确实节省 MCU 引脚，但不是“用四根线读八路 ADC 幅值”。PDF 给出的接口为：
-
-```text
-AD0 = 地址最低位 A
-AD1 = 地址中间位 B
-AD2 = 地址最高位 C
-OUT = 当前所选通道比较后的数字 0/1
-
-CH0 = 000, CH1 = 001, ... , CH7 = 111
-```
-
-资料参考代码的结果数组也是 `uint8_t ir_results[8]`。因此每路只有检测/未检测两种
-状态，不能得到反射强度的真实 12 位 ADC 数值。当前 BSP 为兼容已有循迹算法，把
-数字结果映射为 0 或 4095；以后改成真正的模拟阵列时，上层接口可以保持不变。
-
-### 6.2 SysConfig 和接线
-
-在 SysConfig 新建四个普通 GPIO：
+当前模块的八个输出都是连续模拟电压，不再使用 AD0/AD1/AD2 地址线或数字 OUT。
+BSP 使用两个 ADC12 外设组成一帧：
 
 ```text
-LINE_MUX_AD0：Digital Output，初始低
-LINE_MUX_AD1：Digital Output，初始低
-LINE_MUX_AD2：Digital Output，初始低
-LINE_MUX_OUT：Digital Input
+ADC0：MEM0~MEM2，共 3 路 -> sensor[0..2]
+ADC1：MEM0~MEM4，共 5 路 -> sensor[3..7]
 ```
 
-接线：
+两个序列均为 12 位、软件触发、非重复序列。ADC0 的 MEM2 和 ADC1 的 MEM4 完成
+中断只置位标志；1 ms 主任务必须等两个标志都到达后，才一次性复制八路结果。这样
+不会提交半帧 ADC0 新数据和半帧 ADC1 旧数据，也没有轮询等待、延时或休眠。
+
+### 6.2 已验证的推荐引脚与数组顺序
+
+下面组合已经通过 SysConfig 1.28.0 实际验证，可与 UART0/PA10/PA11、UART1/PB4/PB5、
+SWD PA19/PA20、预留 I2C1/PB2/PB3 和预留 UART2/PB15/PB16 同时存在：
+
+| 数组索引 | ADC/MEM | ADC 输入 | MCU 引脚 | 板级注意事项 |
+|---:|---|---|---|---|
+| 0（最左） | ADC0 MEM0 | ADC0.2 | PA25 | BoosterPack，干净 |
+| 1 | ADC0 MEM1 | ADC0.3 | PA24 | BoosterPack，干净 |
+| 2 | ADC0 MEM2 | ADC0.7 | PA22 | 断开/确认 J16 光线传感器 |
+| 3 | ADC1 MEM0 | ADC1.0 | PA15 | BoosterPack，DAC 未使用时可作 ADC |
+| 4 | ADC1 MEM1 | ADC1.2 | PA17 | BoosterPack，干净 |
+| 5 | ADC1 MEM2 | ADC1.4 | PB17 | BoosterPack，干净 |
+| 6 | ADC1 MEM3 | ADC1.5 | PB18 | BoosterPack，干净 |
+| 7（最右） | ADC1 MEM4 | ADC1.6 | PB19 | BoosterPack，干净 |
+
+传感器输出必须按上表从车辆物理最左到最右接线。若整排八根线刚好完全反向，可以
+临时设置 `CAR_LINE_ADC_REVERSE_ORDER=1`；若只是中间个别通道错位，应修正接线或
+SysConfig MEM 顺序，不能用整体反转掩盖。
+
+### 6.3 SysConfig 配置
+
+添加两个 ADC12 实例，分别命名为 `LINE_ADC0` 和 `LINE_ADC1`。
+
+两者共同设置：
 
 ```text
-模块 AD0 -> LINE_MUX_AD0
-模块 AD1 -> LINE_MUX_AD1
-模块 AD2 -> LINE_MUX_AD2
-模块 OUT -> LINE_MUX_OUT
-模块 GND -> MSPM0 GND
-模块 5V  -> 5V 电源
+Sampling Operation Mode：Sequence
+Repeat Mode：Disabled
+Trigger Source：Software
+Resolution：12-bit unsigned
+Reference：VDDA 3.3 V
+Power Down Mode：Manual
+ADC clock：ULPCLK / 8
+Sample Time 0：40 us
 ```
 
-模块按资料用 5 V 供电。MSPM0 GPIO 不耐受 5 V，连接 OUT 前必须测量其高电平。
-如果 OUT 接近 5 V，必须增加电平转换或合适分压；不能因为它是“数字输出”就直接
-接入。还要确认模块能把 MSPM0 输出的 3.3 V 可靠识别为 AD0~AD2 高电平。
+`LINE_ADC0`：
 
-SysConfig 保存并成功生成四组 `*_PORT`/`*_PIN` 宏后，把 `board_config.h` 中：
+```text
+Peripheral：ADC0
+Start Address：MEM0
+End Address：MEM2
+MEM0 input：Channel 2 / PA25
+MEM1 input：Channel 3 / PA24
+MEM2 input：Channel 7 / PA22
+Interrupt：MEM2 result loaded
+```
+
+`LINE_ADC1`：
+
+```text
+Peripheral：ADC1
+Start Address：MEM0
+End Address：MEM4
+MEM0 input：Channel 0 / PA15
+MEM1 input：Channel 2 / PA17
+MEM2 input：Channel 4 / PB17
+MEM3 input：Channel 5 / PB18
+MEM4 input：Channel 6 / PB19
+Interrupt：MEM4 result loaded
+```
+
+保存并生成后，检查 `ti_msp_dl_config.h` 中存在：
 
 ```c
-#define CAR_LINE_MUX_READY (0U)
+LINE_ADC0_INST / LINE_ADC0_INST_INT_IRQN / LINE_ADC0_INST_IRQHandler
+LINE_ADC1_INST / LINE_ADC1_INST_INT_IRQN / LINE_ADC1_INST_IRQHandler
+```
+
+确认无冲突后，将：
+
+```c
+#define CAR_LINE_ADC_READY (0U)
 ```
 
 改为：
 
 ```c
-#define CAR_LINE_MUX_READY (1U)
+#define CAR_LINE_ADC_READY (1U)
 ```
 
-如果自动生成名与上述实例名不同，只修改 `CAR_LINE_MUX_AD0_*`、`AD1_*`、`AD2_*`
-和 `OUT_*` 八个别名，不要手改 `ti_msp_dl_config.h/.c`。
+如果改变 3+5 分组或序列终点，必须同时修改 `CAR_LINE_ADC0/1_CHANNEL_COUNT`、完成
+中断 IIDX 和中断 MASK。只换某个 MEM 对应的模拟引脚而不改变序列长度时，BSP 无需改。
 
-### 6.3 无阻塞扫描时序
+### 6.4 电气与采样要求
 
-资料示例在每次选通后调用 `delay_us(100)`；当前工程明确不添加这种阻塞等待。
-调度器每 1 ms 调用一次 `BSP_LineADC_Read()`，其状态机按下面顺序工作：
+- 八个模拟输出都必须位于 `0~VDDA`，当前参考为 3.3 V；严禁把 5 V 模拟量直接送入 ADC；
+- 模块和 MSPM0 必须共地；电机地回流不要经过传感器信号地；
+- 40 us 采样窗口对常见带比较/放大输出的灰度模块较宽裕；如模块输出阻抗很高，仍需
+  用示波器确认采样时不会明显拉低电压；
+- 传感器电源旁放置去耦，八根模拟线远离 TB6612 电机端子和 PWM 走线；
+- PA22 使用前处理 J16，避免板载光线传感器与外部灰度输出并联。
 
-```text
-读取上一次已选通道 -> 保存 -> 选择下一通道 -> 立即返回
-```
+### 6.5 上板观察与标定
 
-前七次返回 `false`，读完 CH7 后才把八路工作数组整体复制给上层并返回 `true`。
-这样地址建立时间约 1 ms，完整帧周期 8 ms，帧率约 125 Hz，而且上层不会看到
-半帧旧数据和半帧新数据。禁止在无时间间隔的紧循环中连续调用该函数。
-
-### 6.4 参数和验收
-
-默认参数：
+Watch 建议：
 
 ```c
-CAR_LINE_MUX_ACTIVE_LEVEL  = 1U  // OUT 高表示检测到目标线
-CAR_LINE_MUX_REVERSE_ORDER = 0U  // CH0 作为数组最左侧
-CAR_LINE_MUX_PSEUDO_ADC_MAX = 4095U
+BSP_LineADC_IsReady()
+BSP_LineADC_GetFrameCount()
+BSP_LineADC_GetRestartCount()
+BSP_LineADC_GetUnexpectedIrqCount()
+LineSensor_GetData()->raw[0..7]
+LineSensor_GetData()->normalized[0..7]
+LineSensor_GetData()->position
+LineSensor_GetData()->lineDetected
 ```
 
-上板观察：
-
-- `BSP_LineADC_IsReady()` 应为 `true`；
-- `BSP_LineADC_GetFrameCount()` 每 8 ms 增加一次，约每秒 125；
-- `LineSensor_GetData()->raw[0..7]` 只能是 0 或 4095；
-- 目标线通道的 `normalized[]` 接近 1000，背景接近 0；
-- 线从左向右移动时 `position` 应从负值变到正值。
-
-如果黑白/有效状态完全相反，先把 `CAR_LINE_MUX_ACTIVE_LEVEL` 从 1 改为 0；如果位置
-左右相反，把 `CAR_LINE_MUX_REVERSE_ORDER` 从 0 改为 1。不要为了翻转方向改质心
-权重或 PID 符号。由于输入只有二值，位置和置信度分辨率会低于真实模拟 ADC 阵列，
-循迹 PID 必须重新实车整定。
+正常情况下，`raw[]` 应随灰度连续变化，而不是只有 0/4095；`frameCount` 在 1 ms 任务
+下应接近每秒 1000，`restartCount` 和 `unexpectedIrqCount` 应保持 0。执行 C 开始标定，
+让全部探头都经过赛道线和背景，再用 E 结束；目标线归一化后应接近 1000、背景接近 0。
+若黑白强度整体相反，只修改 `CAR_LINE_BLACK_IS_LOW_RAW`；若位置左右整体相反，先检查
+物理接线，再考虑 `CAR_LINE_ADC_REVERSE_ORDER`。PID 参数必须根据真实连续模拟数据重调。
 
 ## 7. 调试 UART
 
@@ -423,8 +458,8 @@ TB6612 的短时峰值能力当成可持续电流；调试时应限制占空比�
 - IMU UART 在 500 Hz 下不溢出且 CRC 稳定；
 - R/S/X/C/E/G/I 命令行为正确。
 
-灰度 GPIO 可以与通信阶段并行验收：先不接电机电源，观察完整帧计数约 125 Hz，
-逐个遮挡 CH0~CH7，确认只有对应数组元素变化，再验证左右顺序。
+灰度 ADC 可以与通信阶段并行验收：先不接电机电源，观察完整帧计数接近 1 kHz，
+逐个改变八路探头下方灰度，确认对应 `raw[]` 连续变化，再验证左右顺序。
 
 ### 阶段 B：电机开环
 
@@ -450,7 +485,7 @@ TB6612 的短时峰值能力当成可持续电流；调试时应限制占空比�
 
 ### 阶段 E：循迹
 
-- OUT 有效电平、CH0~CH7 顺序和二值映射正确；
+- 八路 ADC 顺序、黑白跨度和连续模拟变化正确；
 - 位置符号正确；
 - 先只开 P，低速跑通；
 - 再加入 D 抑制摆动；
