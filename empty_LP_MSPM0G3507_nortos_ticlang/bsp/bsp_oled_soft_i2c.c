@@ -31,11 +31,15 @@ static void release_or_pull_low(GPIO_Regs *port, uint32_t pin, bool high)
 void BSP_OLED_SoftI2C_Init(void)
 {
 #if CAR_OLED_SOFT_I2C_READY
-    /* 先把输出锁存器设低，再用输出使能控制下拉/释放。 */
-    DL_GPIO_clearPins(CAR_OLED_SCL_PORT, CAR_OLED_SCL_PIN);
-    DL_GPIO_clearPins(CAR_OLED_SDA_PORT, CAR_OLED_SDA_PIN);
+    /*
+     * SysConfig 初始为 SET+Hi-Z，即两根总线均处于释放状态。这里必须先关闭
+     * 输出，再把锁存器预置为低；若顺序相反，会在初始化瞬间产生一次低脉冲。
+     * 后续逻辑 0 只需开启输出，逻辑 1 只需关闭输出。
+     */
     DL_GPIO_disableOutput(CAR_OLED_SCL_PORT, CAR_OLED_SCL_PIN);
     DL_GPIO_disableOutput(CAR_OLED_SDA_PORT, CAR_OLED_SDA_PIN);
+    DL_GPIO_clearPins(CAR_OLED_SCL_PORT, CAR_OLED_SCL_PIN);
+    DL_GPIO_clearPins(CAR_OLED_SDA_PORT, CAR_OLED_SDA_PIN);
     DL_Common_delayCycles(CAR_OLED_SOFT_I2C_DELAY_CYCLES);
 #endif
 }

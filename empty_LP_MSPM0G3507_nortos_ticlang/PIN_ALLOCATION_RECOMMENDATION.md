@@ -11,6 +11,7 @@ ADC1 五路，并明确预留一组硬件 I2C 和一组硬件 UART：
 | HC-05 串口 | UART1 | PB4 TX / PB5 RX | 原工程已配置 |
 | 八路灰度前 3 路 | ADC0 | PA25 / PA24 / PA22 | 推荐，PinMux 已验证 |
 | 八路灰度后 5 路 | ADC1 | PA15 / PA17 / PB17 / PB18 / PB19 | 推荐，PinMux 已验证 |
+| OLED 软件 I2C | 普通 GPIO | PA12 SCL / PA13 SDA | 原工程已配置，Hi-Z 开漏方式 |
 | 备用硬件 I2C | I2C1 | PB2 SCL / PB3 SDA | 推荐保留，PinMux 已验证 |
 | 备用硬件 UART | UART2 | PB15 TX / PB16 RX | 推荐保留，PinMux 已验证 |
 | 下载调试 | SWD | PA19 SWDIO / PA20 SWCLK | 必须保留 |
@@ -193,7 +194,7 @@ SysConfig 的定时器路由统一决定：
 | TB6612 STBY | 一路普通输出 | 上电及初始化阶段保持低，初始化完成再主动拉高 |
 | 左右编码器 | 两组 A/B，共四路 | 优先两个硬件 QEI；同时检查 J12 焊接和引出状态 |
 | 1 ms 系统时基 | TIMG0 / `TICK_TIMER` | 已配置为 1 ms Periodic ZERO 中断，不占用引脚 |
-| OLED 软件 I2C | 两路普通 GPIO | 不占用 PB2/PB3，给硬件 I2C 留口 |
+| OLED 软件 I2C | PA12 SCL / PA13 SDA | 已正式配置；不占用 PB2/PB3，给硬件 I2C 留口 |
 
 这里不直接拍板 PWM/QEI 引脚，是因为“某引脚标有 PWM/QEI”不等于任意组合都能同时
 映射到合适的 Timer/CC 实例。后续应把 ADC、UART、I2C 和已占用的 TIMG0 作为固定
@@ -253,8 +254,10 @@ PA10/PA11 已用于 IMU 且涉及 J21/J22 路由；PB4/PB5 已用于 HC-05。它
 软件层已经完成八路真实 ADC 驱动、每路标定、归一化、质心位置、丢线和路口基础判断。
 ADC 真分支先用临时 SysConfig 自动生成宏做过严格编译验证；随后用户已经在原工程
 `empty.syscfg` 中正式加入 `LINE_ADC0`、`LINE_ADC1`，并恢复 IMU UART0 与 HC-05
-UART1。四个实例同时保存且无 PinMux 冲突，`CAR_LINE_ADC_READY` 已正式启用为 `1U`。
-下一步是实物电压、左右顺序、黑白极性、动态标定和电机干扰验证。
+UART1。随后又正式加入 `OLED_GPIO`：PA12=SCL、PA13=SDA、Initial Set、Hi-Z Enable。
+这些实例同时保存且无 PinMux 冲突；`CAR_LINE_ADC_READY` 和
+`CAR_OLED_SOFT_I2C_READY` 均已正式启用为 `1U`。下一步是实物电压、左右顺序、
+黑白极性、OLED ACK/波形、动态标定和电机干扰验证。
 
 本文不要求也不引入任何休眠、WFI、Standby 或低功耗流程。ADC 采样和主循环均按
 电赛实时控制思路持续运行。

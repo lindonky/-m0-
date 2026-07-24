@@ -32,7 +32,7 @@ Debug/makefile
 - 循迹模块 OUT 的有效电平，以及 5 V 供电时 OUT 的实际高电平；
 - 调试 UART TX/RX 接线；
 - 500 Hz IMU UART TX/RX 接线和模块串口电平；协议驱动已经完成；
-- OLED 的 SCL/SDA 引脚；驱动已按 128×64 SSD1306、地址 0x3C 移植；
+- OLED 已正式分配 PA12=SCL、PA13=SDA；驱动按 128×64 SSD1306、地址 0x3C 移植；
 
 ## 3. TB6612 的 SysConfig 配置
 
@@ -413,8 +413,8 @@ OLED 已使用独立软件 I2C，不占用硬件 I2C Controller，也不占用 I
 ```text
 OLED VCC -> 3.3 V
 OLED GND -> GND
-OLED SCL -> 任意可用 GPIO（待指定）
-OLED SDA -> 任意可用 GPIO（待指定）
+OLED SCL -> PA12
+OLED SDA -> PA13
 ```
 
 建议给 OLED 使用 3.3 V，避免某些模块把 I2C 上拉到 5 V。检查模块是否已有上拉；
@@ -422,9 +422,16 @@ OLED SDA -> 任意可用 GPIO（待指定）
 
 ### 9.2 SysConfig
 
-在 SysConfig 添加两个普通数字 GPIO，建议命名为 `OLED_SCL` 和 `OLED_SDA`。BSP
-使用输出使能模拟开漏：输出低时主动下拉，输出高时关闭输出并由电阻上拉。因此
-不需要硬件 I2C 外设，也不能把总线高电平做成推挽输出。
+正式 SysConfig 已添加 `OLED_GPIO` 组，组内 Pin Name 为 `SCL` 和 `SDA`：
+
+```text
+SCL: PA12, Output, Initial Set, No Resistor, Low Drive, Hi-Z Enable
+SDA: PA13, Output, Initial Set, No Resistor, Low Drive, Hi-Z Enable
+```
+
+BSP 使用输出使能模拟开漏：输出低时主动下拉，输出高时关闭输出并由电阻上拉。
+SysConfig 的 `Initial Set + Hi-Z Enable` 还保证应用 BSP 接管前总线处于释放状态。因此
+不需要硬件 I2C 外设，也不会把总线高电平做成推挽输出。
 
 然后在 `board_config.h`：
 
@@ -432,8 +439,15 @@ OLED SDA -> 任意可用 GPIO（待指定）
 #define CAR_OLED_SOFT_I2C_READY 1U
 ```
 
-若生成符号不是 `OLED_SCL_PORT/OLED_SCL_PIN` 和
-`OLED_SDA_PORT/OLED_SDA_PIN`，只修改其下方四个别名。
+当前已经核对的生成符号为：
+
+```c
+OLED_GPIO_PORT
+OLED_GPIO_SCL_PIN
+OLED_GPIO_SDA_PIN
+```
+
+`board_config.h` 已把四个 BSP 别名映射到这些正式符号。
 
 `CAR_OLED_SOFT_I2C_DELAY_CYCLES` 控制位间隔，应使用示波器观察 SCL 后调整。该短
 忙等只形成软件 I2C 时序，CPU 不会进入休眠。
@@ -445,7 +459,10 @@ OLED SDA -> 任意可用 GPIO（待指定）
 - 完整 `OLED_Update()` 要发送 1 KiB，软件 I2C 下耗时较长；
 - 车辆运行时优先使用 `OLED_UpdateArea()` 更新小区域；
 - 禁止在 ISR、1 ms 传感器任务或 5 ms 控制任务中刷新 OLED；
-- OLED 无应答不能影响电机控制。
+- 当前诊断任务每 100 ms 只发送一个 8 像素页，八行约 0.8 秒轮换一遍；
+- 初始化期间任意字节 NACK 后停止周期刷新，避免无设备时持续占用 CPU；
+- OLED 同步传输仍会造成有界的主循环延迟，正式竞速前应测量单页耗时，必要时降低
+  刷新率或关闭 OLED 诊断任务。
 
 OLED 软件 I2C 和 IMU UART 互不占用同一个外设实例，但仍应避免把 OLED 整屏刷新
 放进 1 ms IMU 接收任务或 5 ms 控制任务。

@@ -190,6 +190,17 @@ extern "C" {
 
 
 
+/* Port definition for Pin Group OLED_GPIO */
+#define OLED_GPIO_PORT                                                   (GPIOA)
+
+/* Defines for SCL: GPIOA.12 with pinCMx 34 on package pin 5 */
+#define OLED_GPIO_SCL_PIN                                       (DL_GPIO_PIN_12)
+#define OLED_GPIO_SCL_IOMUX                                      (IOMUX_PINCM34)
+/* Defines for SDA: GPIOA.13 with pinCMx 35 on package pin 6 */
+#define OLED_GPIO_SDA_PIN                                       (DL_GPIO_PIN_13)
+#define OLED_GPIO_SDA_IOMUX                                      (IOMUX_PINCM35)
+
+
 /* clang-format on */
 
 void SYSCFG_DL_init(void);
@@ -201,6 +212,7 @@ void SYSCFG_DL_IMU_UART_init(void);
 void SYSCFG_DL_HC05_UART_init(void);
 void SYSCFG_DL_LINE_ADC0_init(void);
 void SYSCFG_DL_LINE_ADC1_init(void);
+
 
 bool SYSCFG_DL_saveConfiguration(void);
 bool SYSCFG_DL_restoreConfiguration(void);

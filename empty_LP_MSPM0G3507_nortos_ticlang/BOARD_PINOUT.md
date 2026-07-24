@@ -106,8 +106,8 @@ Excel 共列出 PA0~PA31 和 PB0~PB27，合计 60 个 GPIO 名称：
 | 6 | PB13 | PWM | 未分配 |
 | 7 | PA10 | LINTX | 已配置为 IMU UART0 TX |
 | 8 | PA11 | LINRX | 已配置为 IMU UART0 RX |
-| 9 | PA12 | CANTX | 未分配 |
-| 10 | PA13 | CANRX | 未分配 |
+| 9 | PA12 | CANTX | 已配置为 OLED 软件 I2C SCL |
+| 10 | PA13 | CANRX | 已配置为 OLED 软件 I2C SDA |
 
 图片上的 LIN/CAN/SPI/PWM 是接口常用角色，不表示这些引脚只能做这一种功能。
 
@@ -129,8 +129,8 @@ Excel 共列出 PA0~PA31 和 PB0~PB27，合计 60 个 GPIO 名称：
 | PA9 | SW1 | J14 选择 SW1 引脚 PB23/PA9 | √，需确认 J14 | BoosterPack |
 | PA10 | XDS UART TX | J21 设置引出至 XDS/BoosterPack | √，需确认 J21 | BoosterPack |
 | PA11 | XDS UART RX | J22 设置引出至 XDS/BoosterPack | √，需确认 J22 | BoosterPack |
-| PA12 | 无 | 无 | √ | BoosterPack |
-| PA13 | 无 | 无 | √ | BoosterPack |
+| PA12 | 无 | 无 | √，已用于 OLED SCL | BoosterPack |
+| PA13 | 无 | 无 | √，已用于 OLED SDA | BoosterPack |
 | PA14 | 无 | 无 | √ | 下方未焊接区 |
 | PA15 | 无 | 无 | √ | BoosterPack |
 | PA16 | SW2 | J15 选择 SW2 引脚 PA16/PA18 | √，需确认 J15 | BoosterPack |
@@ -210,7 +210,7 @@ Excel 共列出 PA0~PA31 和 PB0~PB27，合计 60 个 GPIO 名称：
 | SWD 下载调试 | PA19/PA20 | 保留 | 不参与整车外设分配 |
 | HC-05 TX | UART1 TX / PB4 | SysConfig 已配置 | MCU PB4 -> HC-05 RX；PB4 不再用于 PWM |
 | HC-05 RX | UART1 RX / PB5 | SysConfig 已配置 | MCU PB5 <- HC-05 TX；确认未焊接区引出 |
-| OLED | 两个普通 GPIO | 软件 I2C 驱动完成、未选引脚 | 需要上拉，避免 5 V 上拉 |
+| OLED SCL/SDA | PA12/PA13 普通 GPIO | SysConfig 和软件 I2C 已启用 | 需要上拉到 3.3 V，避免 5 V 上拉 |
 | TB6612 PWM | 两个 PWM 输出 | 未配置 | 优先同一定时器两个 CC，20 kHz |
 | TB6612 方向/STBY | 五个普通 GPIO | 未配置 | STBY 上电默认低 |
 | 左右编码器 | 四个 QEI 信号 | 未配置 | 两轮共需 A/B 四路，不要只按 J12 三脚假定足够 |
@@ -379,7 +379,7 @@ QEI 和 ADC 分配完成后再选普通 GPIO。选择原则：
 | 循迹 CH7（最右） | 模拟输出 | PB19 | ADC1.6 / MEM4 | BoosterPack | PinMux 已验证，待实物 |
 | 预留 I2C | SCL/SDA | PB2/PB3 | I2C1 / `SPARE_I2C` | BoosterPack | PinMux 已验证，尚未加入原工程 |
 | 预留 UART | TX/RX | PB15/PB16 | UART2 / `SPARE_UART` | BoosterPack | PinMux 已验证，尚未加入原工程 |
-| OLED | SCL/SDA | 待定 | 普通 GPIO | 4.7 kΩ 到 3.3 V | 待验证 |
+| OLED | SCL/SDA | PA12/PA13 | `OLED_GPIO` 普通 GPIO/软件 I2C | 模块自带或 4.7 kΩ 到 3.3 V | 配置/编译待上板 ACK |
 | 系统 | 1 ms tick | 无外接 | TIMG0 / `TICK_TIMER` | 无 | 配置和编译通过，待校时 |
 
 ## 10. 每次改引脚后的核对清单

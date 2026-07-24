@@ -1,0 +1,13 @@
+# FIXED
+
+app/app_scheduler.o: ../app/app_scheduler.c \
+ C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/app/app_scheduler.h \
+ C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/app/app_car.h \
+ C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/app/app_debug.h \
+ C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/bsp/bsp_time.h \
+ C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/config/car_config.h
+C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/app/app_scheduler.h:
+C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/app/app_car.h:
+C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/app/app_debug.h:
+C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/bsp/bsp_time.h:
+C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/config/car_config.h:

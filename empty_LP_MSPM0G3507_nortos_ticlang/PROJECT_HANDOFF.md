@@ -26,7 +26,7 @@
 - 电机驱动：TB6612FNG；
 - 车辆结构：左右双直流电机差速车；
 - 当前循迹传感器：八路独立模拟灰度阵列，使用 ADC0 三路和 ADC1 五路；
-- 可选外设：AB 相编码器、500 Hz 串口 IMU、软件 I2C SSD1306 OLED、调试 UART。
+- 外设：AB 相编码器、500 Hz 串口 IMU、PA12/PA13 软件 I2C SSD1306 OLED、调试 UART。
 
 工程路径：
 
@@ -42,12 +42,12 @@ C:\ti\mspm0_sdk_2_11_00_07
 
 ## 3. 本次开发做了什么
 
-原工程只有 `empty.c` 和只启用系统时钟的 `empty.syscfg`。本次工作在不擅自
-选择引脚、不修改 SDK、不手改 SysConfig 生成文件的前提下，建立了完整的软件
-骨架，并实现了与具体引脚无关的车辆控制逻辑。
+原工程最初只有 `empty.c` 和只启用系统时钟的 `empty.syscfg`。本次工作在不修改
+SDK、不手改 SysConfig 生成文件的前提下，建立了完整软件骨架；随后与用户逐项通过
+SysConfig GUI 确认并正式配置 ADC、UART、1 ms Timer 和 OLED GPIO。
 
-文件变更规模：新建 50 个文件，修改原入口 `empty.c` 1 个文件；其中包含 24 个
-C 源文件。`empty.syscfg` 尚未改动。
+文件变更规模：新建约 50 个文件并修改原入口 `empty.c`；其中包含 24 个 C 源文件。
+`empty.syscfg` 现已由用户在 GUI 中正式加入 ADC0/1、UART0/1、TIMG0 和 OLED GPIO。
 
 主要工作如下：
 
@@ -71,6 +71,8 @@ C 源文件。`empty.syscfg` 尚未改动。
     115200 8N1、FIFO、RX `>= 1 entry` 中断。
 16. 因硬件改为八路独立模拟灰度，移除原数字复用方案，重写双 ADC 非阻塞 BSP，
     并通过完整候选 SysConfig 验证 ADC 3+5 分组、备用 I2C1 和备用 UART2 可共存。
+17. 核对并接入 OLED SysConfig：`OLED_GPIO`、PA12 SCL、PA13 SDA、Initial Set、
+    Hi-Z Enable；增加 100 ms 低优先级逐页诊断刷新。
 
 ## 4. 当前完成度总览
 
@@ -94,7 +96,7 @@ C 源文件。`empty.syscfg` 尚未改动。
 | QEI 底层 | 未实现 | 否 | 需要左右 QEI 资源 |
 | 八路循迹 ADC BSP | 软件、SysConfig 已完成 | 等待上板验证 | ADC0 3路 + ADC1 5路、非阻塞完整帧 |
 | 500 Hz 串口 IMU | 协议完成 | UART 配置后可用 | 9 字节帧、CRC、回绕、超时、标定 |
-| SSD1306 OLED 驱动 | 软件移植完成 | GPIO 配置后可用 | 128×64、0x3C、软件 I2C、ACK 检测 |
+| SSD1306 OLED 驱动 | 软件和 GPIO 已接入 | 等待上板 ACK | PA12/PA13、128×64、0x3C、分行诊断刷新 |
 | 按键、电池、Flash | 未实现 | 否 | 后续增强项 |
 | 十字/环岛/停车线 | 未实现 | 否 | 依赛题规则开发 |
 
@@ -109,13 +111,13 @@ C 源文件。`empty.syscfg` 尚未改动。
 |---|---:|---|
 | 软件架构和模块接口 | 100% | 分层、接口和主循环已建立并链接通过 |
 | 与引脚无关的基础算法 | 90% | 首版已实现，仍缺实车数据验证 |
-| MSPM0 外设/SysConfig 接入 | 55% | IMU、HC-05、ADC0/ADC1、TIMG0 时基已配置；仍缺 PWM/QEI/OLED GPIO |
+| MSPM0 外设/SysConfig 接入 | 65% | IMU、HC-05、ADC0/ADC1、TIMG0、OLED GPIO 已配置；仍缺 PWM/QEI |
 | 电机和编码器台架验证 | 0% | 尚未连接实物 |
 | 基础速度闭环 | 30% | 软件存在，硬件未接入、参数未整定 |
 | 基础连续线循迹 | 60% | 双 ADC 已正式启用，解算和控制存在；缺传感器接线、标定与实车验证 |
 | 比赛赛道元素 | 0% | 尚未取得具体赛题规则 |
 | IMU | 80% | 协议/UART BSP/诊断完成，缺实际引脚和上板数据验证 |
-| OLED | 80% | 驱动/字库完成，缺实际 SCL/SDA 和上板验证 |
+| OLED | 90% | 驱动/字库/PA12/PA13/诊断页完成，缺实物 ACK、波形和显示验证 |
 | 安全与诊断增强 | 20% | 有丢线/急停，缺欠压、堵转、超时等 |
 
 当前里程碑可定义为：**“软件框架 V0.1 完成，等待接线表进入硬件移植阶段”**。
@@ -224,6 +226,7 @@ IMU 是独立 UART，不能与调试 CSV 串口共用。CRC 错误、协议头�
 | 5 ms | 编码器、方向环、速度环、电机 | 200 Hz 控制周期 |
 | 10 ms | 状态和安全检查 | 状态逻辑无需进入高速 ISR |
 | 20 ms | UART 遥测 | 避免调试输出占用过多带宽 |
+| 100 ms | OLED 一页诊断数据 | 每次最多 120 字节；八页约 0.8 秒轮换一次 |
 
 当前 `TICK_TIMER/TIMG0` 已按 1 ms 周期配置。定时器 ISR 只做：
 
@@ -376,6 +379,17 @@ PB4 在板卡资料中同时是 PWM 候选，后续给 TB6612 分配 PWM 时必�
   和 `HC05_UART/UART1`；`CAR_LINE_ADC_READY=1` 后执行 Clean 全量构建并链接成功；
 - 最终 map 明确包含来自 `bsp_line_adc.o` 的 `ADC0_IRQHandler`、`ADC1_IRQHandler`，
   以及互不冲突的 `UART0_IRQHandler`、`UART1_IRQHandler`；
+- 用户已正式保存 `TICK_TIMER/TIMG0`：BUSCLK/1、Load=31999、Periodic、1 ms、
+  ZERO 中断、SysConfig 不自动启动；`BSP_Time_Init()` 负责清状态、开 NVIC 和启动；
+- TIMG0 接入后再次执行 Clean 全量构建成功，最终 map 中 `TIMG0_IRQHandler` 明确
+  来自 `bsp_time.o`，并与 ADC0/ADC1/UART0/UART1 四个已有 ISR 同时存在；
+- 2026-07-24 用户正式保存 `OLED_GPIO`，磁盘 `.syscfg` 明确为 PA12/PA13、Initial
+  Set、Hi-Z Enable；使用正式完整配置重新运行 SysConfig 1.28.0 验证和生成成功；
+- 生成结果明确包含 `OLED_GPIO_PORT`、`OLED_GPIO_SCL_PIN`、`OLED_GPIO_SDA_PIN`，且
+  两脚均为 `DL_GPIO_HIZ_ENABLE`、无内部电阻、低驱动强度；
+- 启用 `CAR_OLED_SOFT_I2C_READY=1` 后，`app_debug.c`、`app_scheduler.c`、
+  `bsp_oled_soft_i2c.c`、`oled.c` 已使用正式生成头和器件选项完成 TI Arm Clang
+  单文件编译检查；完整原工程 Clean Build 仍应在同步后再次执行；
 - 真实原工程构建已触发 SysConfig 重新生成并完整链接成功；生成结果明确为
   `HC05_UART_INST=UART1`、`UART1_IRQHandler`、RX=GPIOB/PB5、TX=GPIOB/PB4，
   115200 baud、FIFO 和 RX one-entry threshold；
@@ -436,8 +450,9 @@ PB4 在板卡资料中同时是 PWM 候选，后续给 TB6612 分配 PWM 时必�
   输入 MSPM0 ADC；
 - 推荐 ADC 方案只有 PA22 涉及板载光线传感器，使用前必须确认/断开 J16；
 - 标定结果只保存在 RAM，上电后丢失；
-- OLED 已按 128×64 SSD1306/0x3C 移植，但尚未配置实际 GPIO，也未上板确认 ACK；
-- OLED 使用阻塞式软件 I2C，完整 1 KiB 刷新不能放进实时控制路径；
+- OLED 已按 128×64 SSD1306/0x3C 移植并配置 PA12/PA13，但尚未上板确认 ACK；
+- OLED 使用同步软件 I2C，完整 1 KiB 刷新不能放进实时控制路径；当前每 100 ms
+  只更新一页，正式竞速前仍要测量单页耗时并评估是否进一步降频或关闭显示；
 - 串口 IMU 已配置 UART0、PA10 TX、PA11 RX，但尚未上板确认 J21/J22 路由、CRC、
   零偏和物理方向；
 - 没有单元测试框架，验证主要为编译、链接和后续硬件测试。
@@ -472,7 +487,7 @@ PB4 在板卡资料中同时是 PWM 候选，后续给 TB6612 分配 PWM 时必�
 - 左右速度闭环分别稳定；
 - 低速循迹不持续振荡；
 - 丢线超时能够可靠停机；
-- 调试 UART、IMU UART 或 OLED 故障不会阻塞控制环；
+- 调试 UART、IMU UART 或 OLED 故障不会造成永久等待；OLED 单页同步传输必须实测耗时；
 - 运行代码中仍没有阻塞延时和低功耗入口。
 
 ## 17. 工程做事方法与后续协作规范

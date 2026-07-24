@@ -162,13 +162,16 @@
 #endif
 
 /*
- * OLED 使用软件 I2C，不占用上面的硬件 I2C 控制器。
- * 在 SysConfig 中把两个引脚配置为普通数字 GPIO，并确保总线上有上拉电阻。
- * 建议把 SysConfig 引脚实例命名为 OLED_SCL 和 OLED_SDA，随后把 READY 改为 1。
- * BSP 通过“输出低/切换为输入高阻”模拟开漏，不会主动推挽输出高电平。
+ * OLED 使用软件 I2C，不占用上面为后续传感器预留的硬件 I2C1。
+ * 正式 SysConfig 已建立 OLED_GPIO 组：PA12=SCL、PA13=SDA；两脚均配置为
+ * Output、Initial Set、No Resistor、Low Drive、Hi-Z Enable、无中断。
+ *
+ * GPIO 输出锁存值为 1 时，MSPM0 的 Hi-Z 功能会释放线路；锁存值为 0 时主动
+ * 下拉。BSP 另外使用输出使能控制确保逻辑 1 始终为高阻，不会主动推挽到高电平。
+ * SCL/SDA 必须由 OLED 模块或外部电阻上拉到 3.3 V，禁止上拉到 5 V。
  */
 #ifndef CAR_OLED_SOFT_I2C_READY
-#define CAR_OLED_SOFT_I2C_READY              (0U)
+#define CAR_OLED_SOFT_I2C_READY              (1U)
 #endif
 #ifndef CAR_OLED_I2C_ADDRESS_7BIT
 #define CAR_OLED_I2C_ADDRESS_7BIT            (0x3CU)
@@ -178,18 +181,18 @@
 #endif
 
 #if CAR_OLED_SOFT_I2C_READY
-/* TODO：若你的 SysConfig 生成名不同，只修改以下四个别名。 */
+/* OLED_GPIO 为 SysConfig 组名；SCL/SDA 为该组内的 Pin Name。 */
 #ifndef CAR_OLED_SCL_PORT
-#define CAR_OLED_SCL_PORT                    (OLED_SCL_PORT)
+#define CAR_OLED_SCL_PORT                    (OLED_GPIO_PORT)
 #endif
 #ifndef CAR_OLED_SCL_PIN
-#define CAR_OLED_SCL_PIN                     (OLED_SCL_PIN)
+#define CAR_OLED_SCL_PIN                     (OLED_GPIO_SCL_PIN)
 #endif
 #ifndef CAR_OLED_SDA_PORT
-#define CAR_OLED_SDA_PORT                    (OLED_SDA_PORT)
+#define CAR_OLED_SDA_PORT                    (OLED_GPIO_PORT)
 #endif
 #ifndef CAR_OLED_SDA_PIN
-#define CAR_OLED_SDA_PIN                     (OLED_SDA_PIN)
+#define CAR_OLED_SDA_PIN                     (OLED_GPIO_SDA_PIN)
 #endif
 #endif
 

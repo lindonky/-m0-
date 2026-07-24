@@ -18,6 +18,7 @@ static uint32_t g_nextSensorMs;
 static uint32_t g_nextControlMs;
 static uint32_t g_nextStateMs;
 static uint32_t g_nextDebugMs;
+static uint32_t g_nextOledMs;
 
 static bool due(uint32_t now, uint32_t deadline)
 {
@@ -34,6 +35,7 @@ void App_Scheduler_Init(void)
     g_nextControlMs = now + CAR_CONTROL_PERIOD_MS;
     g_nextStateMs = now + 10U;
     g_nextDebugMs = now + CAR_DEBUG_PERIOD_MS;
+    g_nextOledMs = now + CAR_OLED_PERIOD_MS;
 }
 
 void App_Scheduler_Run(void)
@@ -58,5 +60,10 @@ void App_Scheduler_Run(void)
     if (due(now, g_nextDebugMs)) {
         g_nextDebugMs = now + CAR_DEBUG_PERIOD_MS;
         App_Debug_Task();
+    }
+    if (due(now, g_nextOledMs)) {
+        /* OLED 软件 I2C 放在所有实时性更高的任务之后，并且每次只刷新一行。 */
+        g_nextOledMs = now + CAR_OLED_PERIOD_MS;
+        App_Debug_OLEDTask();
     }
 }
