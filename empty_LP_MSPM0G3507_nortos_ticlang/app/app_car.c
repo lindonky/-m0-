@@ -22,7 +22,7 @@ static uint32_t g_lastLineSeenMs;
 
 void App_Car_Init(void)
 {
-    /* 先清软件时间，再启动可能产生中断的板级外设。 */
+    /* 先清软件时间并启动 1 ms 时基，再初始化其余板级和车辆模块。 */
     BSP_Time_Init();
     BSP_Board_Init();
     Motor_Init();

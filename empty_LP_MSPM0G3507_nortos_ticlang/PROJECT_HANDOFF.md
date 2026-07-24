@@ -80,19 +80,19 @@ C 源文件。`empty.syscfg` 尚未改动。
 | TB6612 上层逻辑 | 已完成 | BSP 完成后可用 | A/B 通道、方向、刹车、滑行 |
 | 电机控制 | 已完成 | BSP 完成后可用 | 极性、限幅、斜坡、死区、安全停机 |
 | 编码器数学处理 | 已完成 | QEI BSP 完成后可用 | 速度、RPM、距离、滤波 |
-| 循迹算法 | 已完成首版 | 两个 ADC 序列配置后可用 | 真实模拟量、标定、质心、丢线 |
+| 循迹算法 | 已完成首版 | 等待上板验证 | 真实模拟量、标定、质心、丢线 |
 | 通用 PID | 已完成 | 是 | 仍需实车调参 |
 | 左右速度闭环 | 已完成首版 | 编码器接入后可用 | 默认参数只是起点 |
 | 循迹方向闭环 | 已完成首版 | 传感器接入后可用 | 默认使用 PD |
 | 差速混合 | 已完成 | 是 | 超限时按比例缩放 |
-| 任务调度器 | 已完成 | 需 1ms ISR | 无休眠、无阻塞延时 |
+| 任务调度器 | 软件和 1 ms Timer 已完成 | 等待上板校时 | TIMG0、1 ms ZERO ISR；无休眠、无阻塞延时 |
 | 整车状态机 | 已完成基础状态 | 是 | 尚无环岛等比赛元素 |
 | HC-05 调试 UART 应用协议 | 已完成 | 等待上板验证 | R/S/X/C/E/G/I 和 CSV |
 | HC-05 调试 UART 底层 | 软件、SysConfig、构建已通过 | 等待上板验证 | UART1、PB4/PB5、FIFO/ISR |
-| IMU UART 底层 | 软件完成 | SysConfig 后可用 | RX/TX 环形缓冲、ISR、无阻塞等待 |
+| IMU UART 底层 | 软件、SysConfig、构建已通过 | 等待上板验证 | UART0、PA10/PA11、RX/TX 环形缓冲 |
 | PWM/GPIO 底层 | 未实现 | 否 | 需要 SysConfig 符号 |
 | QEI 底层 | 未实现 | 否 | 需要左右 QEI 资源 |
-| 八路循迹 ADC BSP | 软件完成 | SysConfig 后可用 | ADC0 3路 + ADC1 5路、非阻塞完整帧 |
+| 八路循迹 ADC BSP | 软件、SysConfig 已完成 | 等待上板验证 | ADC0 3路 + ADC1 5路、非阻塞完整帧 |
 | 500 Hz 串口 IMU | 协议完成 | UART 配置后可用 | 9 字节帧、CRC、回绕、超时、标定 |
 | SSD1306 OLED 驱动 | 软件移植完成 | GPIO 配置后可用 | 128×64、0x3C、软件 I2C、ACK 检测 |
 | 按键、电池、Flash | 未实现 | 否 | 后续增强项 |
@@ -109,10 +109,10 @@ C 源文件。`empty.syscfg` 尚未改动。
 |---|---:|---|
 | 软件架构和模块接口 | 100% | 分层、接口和主循环已建立并链接通过 |
 | 与引脚无关的基础算法 | 90% | 首版已实现，仍缺实车数据验证 |
-| MSPM0 外设/SysConfig 接入 | 30% | IMU/HC-05 已分配；八路 ADC 方案已验证、待用户配置 |
+| MSPM0 外设/SysConfig 接入 | 55% | IMU、HC-05、ADC0/ADC1、TIMG0 时基已配置；仍缺 PWM/QEI/OLED GPIO |
 | 电机和编码器台架验证 | 0% | 尚未连接实物 |
 | 基础速度闭环 | 30% | 软件存在，硬件未接入、参数未整定 |
-| 基础连续线循迹 | 50% | 双 ADC BSP、解算和控制存在，缺原工程配置与实车验证 |
+| 基础连续线循迹 | 60% | 双 ADC 已正式启用，解算和控制存在；缺传感器接线、标定与实车验证 |
 | 比赛赛道元素 | 0% | 尚未取得具体赛题规则 |
 | IMU | 80% | 协议/UART BSP/诊断完成，缺实际引脚和上板数据验证 |
 | OLED | 80% | 驱动/字库完成，缺实际 SCL/SDA 和上板验证 |
@@ -225,7 +225,7 @@ IMU 是独立 UART，不能与调试 CSV 串口共用。CRC 错误、协议头�
 | 10 ms | 状态和安全检查 | 状态逻辑无需进入高速 ISR |
 | 20 ms | UART 遥测 | 避免调试输出占用过多带宽 |
 
-1 ms 定时器 ISR 只应：
+当前 `TICK_TIMER/TIMG0` 已按 1 ms 周期配置。定时器 ISR 只做：
 
 1. 判断并清除 1 ms 定时器中断标志；
 2. 调用 `BSP_Time_Tick1msFromISR()`；
@@ -372,6 +372,10 @@ PB4 在板卡资料中同时是 PWM 候选，后续给 TB6612 分配 PWM 时必�
   I2C1/PB2/PB3 和 UART2/PB15/PB16 可以同时生成且无 PinMux 冲突；
 - 使用该验证配置实际生成的 `LINE_ADC0/1` 宏再次编译真实 DriverLib 分支成功；
 - ADC ISR 只置完成标志，主任务在两组均完成后提交；实现中没有阻塞等待或延时；
+- 用户已在原工程正式保存 `LINE_ADC0/ADC0`、`LINE_ADC1/ADC1`、`IMU_UART/UART0`
+  和 `HC05_UART/UART1`；`CAR_LINE_ADC_READY=1` 后执行 Clean 全量构建并链接成功；
+- 最终 map 明确包含来自 `bsp_line_adc.o` 的 `ADC0_IRQHandler`、`ADC1_IRQHandler`，
+  以及互不冲突的 `UART0_IRQHandler`、`UART1_IRQHandler`；
 - 真实原工程构建已触发 SysConfig 重新生成并完整链接成功；生成结果明确为
   `HC05_UART_INST=UART1`、`UART1_IRQHandler`、RX=GPIOB/PB5、TX=GPIOB/PB4，
   115200 baud、FIFO 和 RX one-entry threshold；
@@ -386,9 +390,8 @@ PB4 在板卡资料中同时是 PWM 候选，后续给 TB6612 分配 PWM 时必�
 
 ### 第一优先级：让基础硬件产生可信数据
 
-1. 在 `empty.syscfg` 继续创建 1 ms 定时器、双 PWM、方向 GPIO、双 QEI，以及
-   `LINE_ADC0` 三通道序列和 `LINE_ADC1` 五通道序列；IMU UART0 和 HC-05 UART1
-   已分配；
+1. 在 `empty.syscfg` 继续创建双 PWM、方向 GPIO和双 QEI；`TICK_TIMER/TIMG0`、
+   `LINE_ADC0/1`、IMU UART0 和 HC-05 UART1 已正式分配；
 2. ADC 按 PA25、PA24、PA22、PA15、PA17、PB17、PB18、PB19 从最左到最右配置；
 3. 保留 I2C1/PB2/PB3 和 UART2/PB15/PB16，不再把它们分配给普通 GPIO；
 4. 填写所有 BSP TODO；
@@ -419,8 +422,8 @@ PB4 在板卡资料中同时是 PWM 候选，后续给 TB6612 分配 PWM 时必�
 
 - MG513 标称堵转电流约 2.8 A，明显高于 TB6612 常用约 1.2 A/通道连续能力；
   虽然峰值规格可能短时覆盖，但堵转会快速发热，必须避免长时间堵转并考虑硬件保护；
-- PWM/GPIO/QEI BSP 仍是安全占位，当前下载后不会驱动电机；八路模拟 ADC 软件已完成，
-  但因 `CAR_LINE_ADC_READY=0` 暂不访问尚未加入原 SysConfig 的 ADC0/ADC1；
+- PWM/GPIO/QEI BSP 仍是安全占位，当前下载后不会驱动电机；八路模拟 ADC 已在
+  SysConfig 中正式配置并由 `CAR_LINE_ADC_READY=1` 启用，但尚未接传感器实测；
 - 没有硬件数据就无法验证循迹极性和权重方向；
 - 默认 PID 未经实车调节；
 - 编码器速度滤波系数固定在源码中；

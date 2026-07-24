@@ -1,5 +1,0 @@
-# FIXED
-
-control/pid.o: ../control/pid.c \
- C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/control/pid.h
-C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/control/pid.h:

@@ -214,10 +214,10 @@ Excel 共列出 PA0~PA31 和 PB0~PB27，合计 60 个 GPIO 名称：
 | TB6612 PWM | 两个 PWM 输出 | 未配置 | 优先同一定时器两个 CC，20 kHz |
 | TB6612 方向/STBY | 五个普通 GPIO | 未配置 | STBY 上电默认低 |
 | 左右编码器 | 四个 QEI 信号 | 未配置 | 两轮共需 A/B 四路，不要只按 J12 三脚假定足够 |
-| 八路模拟循迹 | ADC0 三路 + ADC1 五路 | 驱动完成、原工程 SysConfig 未配置 | 八路真实 12 位 ADC；推荐引脚已经过独立 SysConfig 验证 |
+| 八路模拟循迹 | ADC0 三路 + ADC1 五路 | SysConfig 已配置、驱动已启用 | 八路真实 12 位 ADC；等待上板验证电压、顺序和极性 |
 | 预留 I2C | I2C1 / PB2 SCL / PB3 SDA | 方案已验证、暂不加入原工程 | 给后续硬件 I2C 外设；外接 3.3 V 上拉 |
 | 预留 UART | UART2 / PB15 TX / PB16 RX | 方案已验证、暂不加入原工程 | 给后续串口模块；UART3 仍未使用 |
-| 1 ms 时基 | 一个定时器 | 未配置 | ISR 只调用 `BSP_Time_Tick1msFromISR()` |
+| 1 ms 时基 | TICK_TIMER / TIMG0 | SysConfig 已配置、BSP 已接入 | BUSCLK/1、Load=31999、Periodic、ZERO ISR、无外接引脚 |
 
 ## 7. 面向循迹小车的候选分配思路
 
@@ -348,7 +348,7 @@ QEI 和 ADC 分配完成后再选普通 GPIO。选择原则：
 4. 固定八路 ADC 的 3+5 分组，处理 PA22/J16，并验证每路输入不超过 3.3 V；
 5. 保留 I2C1/PB2/PB3 和 UART2/PB15/PB16，避免后续无接口可用；
 6. 为两只编码器选择两个 QEI A/B 组合；
-7. 为 TB6612 选择两路 PWM，同时保留 1 ms 定时器；
+7. 为 TB6612 选择两路 PWM，明确避开已经占用的 TIMG0；
 8. 最后分配 TB6612 五个普通 GPIO 和 OLED 两个软件 I2C GPIO；
 9. 把每个最终选择写入下面的正式记录表和 `config/board_config.h`；
 10. 保存 SysConfig，核对生成宏，Clean + Build；
@@ -380,7 +380,7 @@ QEI 和 ADC 分配完成后再选普通 GPIO。选择原则：
 | 预留 I2C | SCL/SDA | PB2/PB3 | I2C1 / `SPARE_I2C` | BoosterPack | PinMux 已验证，尚未加入原工程 |
 | 预留 UART | TX/RX | PB15/PB16 | UART2 / `SPARE_UART` | BoosterPack | PinMux 已验证，尚未加入原工程 |
 | OLED | SCL/SDA | 待定 | 普通 GPIO | 4.7 kΩ 到 3.3 V | 待验证 |
-| 系统 | 1 ms tick | 无外接 | Timer 待定 | 无 | 待验证 |
+| 系统 | 1 ms tick | 无外接 | TIMG0 / `TICK_TIMER` | 无 | 配置和编译通过，待校时 |
 
 ## 10. 每次改引脚后的核对清单
 

@@ -77,6 +77,14 @@ extern "C" {
 
 
 
+/* Defines for TICK_TIMER */
+#define TICK_TIMER_INST                                                  (TIMG0)
+#define TICK_TIMER_INST_IRQHandler                              TIMG0_IRQHandler
+#define TICK_TIMER_INST_INT_IRQN                                (TIMG0_INT_IRQn)
+#define TICK_TIMER_INST_LOAD_VALUE                                      (31999U)
+
+
+
 /* Defines for IMU_UART */
 #define IMU_UART_INST                                                      UART0
 #define IMU_UART_INST_FREQUENCY                                         32000000
@@ -113,14 +121,86 @@ extern "C" {
 
 
 
+
+/* Defines for LINE_ADC0 */
+#define LINE_ADC0_INST                                                      ADC0
+#define LINE_ADC0_INST_IRQHandler                                ADC0_IRQHandler
+#define LINE_ADC0_INST_INT_IRQN                                  (ADC0_INT_IRQn)
+#define LINE_ADC0_ADCMEM_0                                    DL_ADC12_MEM_IDX_0
+#define LINE_ADC0_ADCMEM_0_REF                   DL_ADC12_REFERENCE_VOLTAGE_VDDA
+#define LINE_ADC0_ADCMEM_0_REF_VOLTAGE_V                                     3.3
+#define LINE_ADC0_ADCMEM_1                                    DL_ADC12_MEM_IDX_1
+#define LINE_ADC0_ADCMEM_1_REF                   DL_ADC12_REFERENCE_VOLTAGE_VDDA
+#define LINE_ADC0_ADCMEM_1_REF_VOLTAGE_V                                     3.3
+#define LINE_ADC0_ADCMEM_2                                    DL_ADC12_MEM_IDX_2
+#define LINE_ADC0_ADCMEM_2_REF                   DL_ADC12_REFERENCE_VOLTAGE_VDDA
+#define LINE_ADC0_ADCMEM_2_REF_VOLTAGE_V                                     3.3
+#define GPIO_LINE_ADC0_C2_PORT                                             GPIOA
+#define GPIO_LINE_ADC0_C2_PIN                                     DL_GPIO_PIN_25
+#define GPIO_LINE_ADC0_IOMUX_C2                                  (IOMUX_PINCM55)
+#define GPIO_LINE_ADC0_IOMUX_C2_FUNC              (IOMUX_PINCM55_PF_UNCONNECTED)
+#define GPIO_LINE_ADC0_C3_PORT                                             GPIOA
+#define GPIO_LINE_ADC0_C3_PIN                                     DL_GPIO_PIN_24
+#define GPIO_LINE_ADC0_IOMUX_C3                                  (IOMUX_PINCM54)
+#define GPIO_LINE_ADC0_IOMUX_C3_FUNC              (IOMUX_PINCM54_PF_UNCONNECTED)
+#define GPIO_LINE_ADC0_C7_PORT                                             GPIOA
+#define GPIO_LINE_ADC0_C7_PIN                                     DL_GPIO_PIN_22
+#define GPIO_LINE_ADC0_IOMUX_C7                                  (IOMUX_PINCM47)
+#define GPIO_LINE_ADC0_IOMUX_C7_FUNC              (IOMUX_PINCM47_PF_UNCONNECTED)
+
+/* Defines for LINE_ADC1 */
+#define LINE_ADC1_INST                                                      ADC1
+#define LINE_ADC1_INST_IRQHandler                                ADC1_IRQHandler
+#define LINE_ADC1_INST_INT_IRQN                                  (ADC1_INT_IRQn)
+#define LINE_ADC1_ADCMEM_0                                    DL_ADC12_MEM_IDX_0
+#define LINE_ADC1_ADCMEM_0_REF                   DL_ADC12_REFERENCE_VOLTAGE_VDDA
+#define LINE_ADC1_ADCMEM_0_REF_VOLTAGE_V                                     3.3
+#define LINE_ADC1_ADCMEM_1                                    DL_ADC12_MEM_IDX_1
+#define LINE_ADC1_ADCMEM_1_REF                   DL_ADC12_REFERENCE_VOLTAGE_VDDA
+#define LINE_ADC1_ADCMEM_1_REF_VOLTAGE_V                                     3.3
+#define LINE_ADC1_ADCMEM_2                                    DL_ADC12_MEM_IDX_2
+#define LINE_ADC1_ADCMEM_2_REF                   DL_ADC12_REFERENCE_VOLTAGE_VDDA
+#define LINE_ADC1_ADCMEM_2_REF_VOLTAGE_V                                     3.3
+#define LINE_ADC1_ADCMEM_3                                    DL_ADC12_MEM_IDX_3
+#define LINE_ADC1_ADCMEM_3_REF                   DL_ADC12_REFERENCE_VOLTAGE_VDDA
+#define LINE_ADC1_ADCMEM_3_REF_VOLTAGE_V                                     3.3
+#define LINE_ADC1_ADCMEM_4                                    DL_ADC12_MEM_IDX_4
+#define LINE_ADC1_ADCMEM_4_REF                   DL_ADC12_REFERENCE_VOLTAGE_VDDA
+#define LINE_ADC1_ADCMEM_4_REF_VOLTAGE_V                                     3.3
+#define GPIO_LINE_ADC1_C0_PORT                                             GPIOA
+#define GPIO_LINE_ADC1_C0_PIN                                     DL_GPIO_PIN_15
+#define GPIO_LINE_ADC1_IOMUX_C0                                  (IOMUX_PINCM37)
+#define GPIO_LINE_ADC1_IOMUX_C0_FUNC              (IOMUX_PINCM37_PF_UNCONNECTED)
+#define GPIO_LINE_ADC1_C2_PORT                                             GPIOA
+#define GPIO_LINE_ADC1_C2_PIN                                     DL_GPIO_PIN_17
+#define GPIO_LINE_ADC1_IOMUX_C2                                  (IOMUX_PINCM39)
+#define GPIO_LINE_ADC1_IOMUX_C2_FUNC              (IOMUX_PINCM39_PF_UNCONNECTED)
+#define GPIO_LINE_ADC1_C4_PORT                                             GPIOB
+#define GPIO_LINE_ADC1_C4_PIN                                     DL_GPIO_PIN_17
+#define GPIO_LINE_ADC1_IOMUX_C4                                  (IOMUX_PINCM43)
+#define GPIO_LINE_ADC1_IOMUX_C4_FUNC              (IOMUX_PINCM43_PF_UNCONNECTED)
+#define GPIO_LINE_ADC1_C5_PORT                                             GPIOB
+#define GPIO_LINE_ADC1_C5_PIN                                     DL_GPIO_PIN_18
+#define GPIO_LINE_ADC1_IOMUX_C5                                  (IOMUX_PINCM44)
+#define GPIO_LINE_ADC1_IOMUX_C5_FUNC              (IOMUX_PINCM44_PF_UNCONNECTED)
+#define GPIO_LINE_ADC1_C6_PORT                                             GPIOB
+#define GPIO_LINE_ADC1_C6_PIN                                     DL_GPIO_PIN_19
+#define GPIO_LINE_ADC1_IOMUX_C6                                  (IOMUX_PINCM45)
+#define GPIO_LINE_ADC1_IOMUX_C6_FUNC              (IOMUX_PINCM45_PF_UNCONNECTED)
+
+
+
 /* clang-format on */
 
 void SYSCFG_DL_init(void);
 void SYSCFG_DL_initPower(void);
 void SYSCFG_DL_GPIO_init(void);
 void SYSCFG_DL_SYSCTL_init(void);
+void SYSCFG_DL_TICK_TIMER_init(void);
 void SYSCFG_DL_IMU_UART_init(void);
 void SYSCFG_DL_HC05_UART_init(void);
+void SYSCFG_DL_LINE_ADC0_init(void);
+void SYSCFG_DL_LINE_ADC1_init(void);
 
 bool SYSCFG_DL_saveConfiguration(void);
 bool SYSCFG_DL_restoreConfiguration(void);

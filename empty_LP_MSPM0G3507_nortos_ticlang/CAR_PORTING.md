@@ -72,21 +72,39 @@ AIN1 AIN2 BIN1 BIN2 STBY
 
 ## 4. 1 ms 调度定时器
 
-创建一个 1 ms 周期定时器并启用中断。中断中只做：
+当前原工程已创建 `TICK_TIMER`，使用 TIMG0、BUSCLK/1、Prescaler=1、周期 1 ms、
+Periodic Down Counting，并只启用 ZERO 中断。SysConfig 保持 Counter 停止，
+`BSP_Time_Init()` 在清零软件时间、清中断和打开 NVIC 后手动启动。
+
+生成宏已经约定为：
 
 ```c
-void YOUR_TIMER_IRQHandler(void)
+TICK_TIMER_INST
+TICK_TIMER_INST_INT_IRQN
+TICK_TIMER_INST_IRQHandler
+TICK_TIMER_INST_LOAD_VALUE /* 32 MHz 下为 31999U。 */
+```
+
+真实中断入口由 `bsp/bsp_time.c` 实现，核心行为只有：
+
+```c
+void TICK_TIMER_INST_IRQHandler(void)
 {
-    /* 1. 读取并确认中断来源。 */
-    /* 2. 清除周期中断标志。 */
-    BSP_Time_Tick1msFromISR();
+    switch (DL_TimerG_getPendingInterrupt(TICK_TIMER_INST)) {
+        case DL_TIMER_IIDX_ZERO:
+            BSP_Time_Tick1msFromISR();
+            break;
+        default:
+            break;
+    }
 }
 ```
 
 不要在该 ISR 中调用 `App_Scheduler_Run()`。控制和通信任务在主循环执行，避免 ISR
 过长并保持中断响应可预测。
 
-验收：UART 遥测的第一列应每毫秒递增，长时间运行不停止。
+验收：UART 遥测的第一列应每毫秒递增，长时间运行不停止；1 秒实测计数增量应接近
+1000。当前已完成配置和编译验证，仍需下载后用 Watch/HC-05 验证实际节拍。
 
 ## 5. 左右 QEI 编码器
 
@@ -215,6 +233,9 @@ LINE_ADC1_INST / LINE_ADC1_INST_INT_IRQN / LINE_ADC1_INST_IRQHandler
 ```c
 #define CAR_LINE_ADC_READY (1U)
 ```
+
+当前原工程已经完成上述 SysConfig 配置并正式使用 `1U`。这段切换流程保留给以后
+删除、重命名或重新分配 ADC 实例时参考。
 
 如果改变 3+5 分组或序列终点，必须同时修改 `CAR_LINE_ADC0/1_CHANNEL_COUNT`、完成
 中断 IIDX 和中断 MASK。只换某个 MEM 对应的模拟引脚而不改变序列长度时，BSP 无需改。

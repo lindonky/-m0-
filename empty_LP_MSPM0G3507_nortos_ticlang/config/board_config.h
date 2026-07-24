@@ -50,12 +50,12 @@
  * 推荐实例名为 LINE_ADC0 和 LINE_ADC1；默认分组为 ADC0/MEM0~2 三路、
  * ADC1/MEM0~4 五路。两个序列都由软件触发，最后一个 MEM 完成时产生中断。
  *
- * SysConfig 尚未加入这两个 ADC 实例，因此 READY 必须保持 0。完成配置、确认
- * ti_msp_dl_config.h 已生成 LINE_ADC0/1 的 INST、IRQN 和 IRQHandler 后再改为 1。
+ * 当前 empty.syscfg 已正式加入这两个 ADC 实例，并已核对 3+5 序列、引脚和末尾
+ * 完成中断；READY 因此正式启用。若以后删除或重命名实例，应先恢复为 0。
  * 不要手改 SysConfig 自动生成文件；若实例名不同，只修改下面的别名。
  */
 #ifndef CAR_LINE_ADC_READY
-#define CAR_LINE_ADC_READY                  (0U)
+#define CAR_LINE_ADC_READY                  (1U)
 #endif
 
 #if CAR_LINE_ADC_READY
@@ -91,6 +91,27 @@
 #endif
 #ifndef CAR_LINE_ADC1_DONE_INTERRUPT
 #define CAR_LINE_ADC1_DONE_INTERRUPT        DL_ADC12_INTERRUPT_MEM4_RESULT_LOADED
+#endif
+#endif
+
+/*
+ * NoRTOS 1 ms 单调时基：TICK_TIMER 使用 TIMG0，BUSCLK/1、周期 1 ms、ZERO 中断。
+ * SysConfig 只完成静态配置并保持 Counter 停止；BSP_Time_Init() 清零软件计数、
+ * 清除旧中断、使能 NVIC 后再启动 Counter，避免初始化期间出现不确定的首个 tick。
+ */
+#ifndef CAR_TIMEBASE_READY
+#define CAR_TIMEBASE_READY                  (1U)
+#endif
+
+#if CAR_TIMEBASE_READY
+#ifndef CAR_TIMEBASE_INST
+#define CAR_TIMEBASE_INST                   (TICK_TIMER_INST)
+#endif
+#ifndef CAR_TIMEBASE_IRQN
+#define CAR_TIMEBASE_IRQN                   (TICK_TIMER_INST_INT_IRQN)
+#endif
+#ifndef CAR_TIMEBASE_IRQ_HANDLER
+#define CAR_TIMEBASE_IRQ_HANDLER            TICK_TIMER_INST_IRQHandler
 #endif
 #endif
 

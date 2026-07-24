@@ -128,7 +128,7 @@ LINE_ADC1_INST_INT_IRQN
 LINE_ADC1_INST_IRQHandler
 ```
 
-确认宏名与 `config/board_config.h` 的别名一致并完整构建通过后，才把：
+首次配置时，确认宏名与 `config/board_config.h` 的别名一致并完整构建通过后，才把：
 
 ```c
 #define CAR_LINE_ADC_READY (0U)
@@ -140,8 +140,8 @@ LINE_ADC1_INST_IRQHandler
 #define CAR_LINE_ADC_READY (1U)
 ```
 
-`READY=0` 是有意设计的安全状态：在原工程尚未生成 ADC 初始化代码时，整个工程仍可
-编译，循迹层返回“没有新帧”，不会引用不存在的 ADC 宏。
+`READY=0` 是未配置硬件时的安全状态：原工程现在已经完成上述配置，因此当前正式值
+为 `1U`。如果以后删除 ADC 实例或改名，应在重新适配前先恢复为 `0U`。
 
 ## 5. 预留硬件 I2C
 
@@ -192,12 +192,12 @@ SysConfig 的定时器路由统一决定：
 | TB6612 AIN1/AIN2/BIN1/BIN2 | 四路普通输出 | 最后从无板载负载 GPIO 中选择 |
 | TB6612 STBY | 一路普通输出 | 上电及初始化阶段保持低，初始化完成再主动拉高 |
 | 左右编码器 | 两组 A/B，共四路 | 优先两个硬件 QEI；同时检查 J12 焊接和引出状态 |
-| 1 ms 系统时基 | 一个硬件 Timer | 与 PWM、QEI 的 Timer 实例和通道统筹 |
+| 1 ms 系统时基 | TIMG0 / `TICK_TIMER` | 已配置为 1 ms Periodic ZERO 中断，不占用引脚 |
 | OLED 软件 I2C | 两路普通 GPIO | 不占用 PB2/PB3，给硬件 I2C 留口 |
 
 这里不直接拍板 PWM/QEI 引脚，是因为“某引脚标有 PWM/QEI”不等于任意组合都能同时
-映射到合适的 Timer/CC 实例。应把 ADC、UART、I2C 作为固定约束加入 SysConfig 后，
-再一次性选择两路 PWM、两组 QEI 和 1 ms Timer，以免局部可用、整体冲突。
+映射到合适的 Timer/CC 实例。后续应把 ADC、UART、I2C 和已占用的 TIMG0 作为固定
+约束，再一次性选择两路 PWM 与两组 QEI，以免局部可用、整体冲突。
 
 ## 8. 建议避开的引脚
 
@@ -236,7 +236,7 @@ PA10/PA11 已用于 IMU 且涉及 J21/J22 路由；PB4/PB5 已用于 HC-05。它
 - [ ] 两组都是软件触发、Sequence、非 Repeat；
 - [ ] SysConfig 没有红色 PinMux 冲突；
 - [ ] 自动生成宏与 `board_config.h` 别名一致；
-- [ ] Clean + Build 通过后才将 `CAR_LINE_ADC_READY` 改为 `1U`。
+- [x] 自动生成宏已核对，并将 `CAR_LINE_ADC_READY` 正式改为 `1U`；
 
 ### 9.3 运行时
 
@@ -251,12 +251,10 @@ PA10/PA11 已用于 IMU 且涉及 J21/J22 路由；PB4/PB5 已用于 HC-05。它
 ## 10. 当前状态与下一步
 
 软件层已经完成八路真实 ADC 驱动、每路标定、归一化、质心位置、丢线和路口基础判断。
-ADC 真分支已经用临时 SysConfig 自动生成的宏做过严格编译验证。
-
-原工程的 `empty.syscfg` 目前仍只有 IMU UART0 和 HC-05 UART1，没有加入 `LINE_ADC0`
-与 `LINE_ADC1`，所以 `CAR_LINE_ADC_READY` 必须暂时保持 `0U`。下一步由用户在 CCS
-SysConfig 图形界面按第 4 节配置 ADC，保存生成、核对宏并完整构建；之后才启用
-`READY=1` 并开始实物数据、极性、左右顺序和抗干扰验证。
+ADC 真分支先用临时 SysConfig 自动生成宏做过严格编译验证；随后用户已经在原工程
+`empty.syscfg` 中正式加入 `LINE_ADC0`、`LINE_ADC1`，并恢复 IMU UART0 与 HC-05
+UART1。四个实例同时保存且无 PinMux 冲突，`CAR_LINE_ADC_READY` 已正式启用为 `1U`。
+下一步是实物电压、左右顺序、黑白极性、动态标定和电机干扰验证。
 
 本文不要求也不引入任何休眠、WFI、Standby 或低功耗流程。ADC 采样和主循环均按
 电赛实时控制思路持续运行。

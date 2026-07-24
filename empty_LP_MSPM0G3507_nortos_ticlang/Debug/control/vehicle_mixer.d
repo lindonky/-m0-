@@ -1,5 +1,0 @@
-# FIXED
-
-control/vehicle_mixer.o: ../control/vehicle_mixer.c \
- C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/control/vehicle_mixer.h
-C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/control/vehicle_mixer.h:

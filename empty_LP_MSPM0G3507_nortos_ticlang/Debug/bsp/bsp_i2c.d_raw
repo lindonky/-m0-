@@ -1,0 +1,3 @@
+bsp/bsp_i2c.o: ..\bsp\bsp_i2c.c \
+  C:\ti\workspace_ccstheia\empty_LP_MSPM0G3507_nortos_ticlang\bsp\bsp_i2c.h
+C:\ti\workspace_ccstheia\empty_LP_MSPM0G3507_nortos_ticlang\bsp\bsp_i2c.h:
