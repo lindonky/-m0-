@@ -41,9 +41,13 @@ LineControl_Output LineControl_Update(const LineSensor_Data *line,
         /*
          * PID 的定义是 setpoint-measurement。传入 -position，使右偏（position>0）
          * 得到正 steering，匹配“右转时左轮快、右轮慢”的混合符号约定。
+         *
+         * CAR_LINE_STEERING_POLARITY 只适配整车实际安装后的转向极性，不改变 ADC
+         * 黑白极性、位置左右定义、电机前进极性或编码器方向。当前实车验证需要
+         * -1.0f，因此在 PID 输出形成后整体翻转 P/I/D 三项，避免只反转其中一项。
          */
-        output.steeringMmS = PID_Update(&g_linePid, 0.0f, -line->position,
-                                        dtSeconds);
+        output.steeringMmS = CAR_LINE_STEERING_POLARITY *
+            PID_Update(&g_linePid, 0.0f, -line->position, dtSeconds);
 
         /* 使用位置绝对值做首版弯道降速，最低不低于配置的曲线速度。 */
         slowdown = CAR_CURVE_SLOWDOWN_GAIN * absolute(line->position);
@@ -52,9 +56,10 @@ LineControl_Output LineControl_Update(const LineSensor_Data *line,
     } else {
         /* 短时丢线：降低前进速度，并向最后出现线的一侧持续搜索。 */
         output.forwardMmS = CAR_MIN_CURVE_SPEED_MM_S;
-        output.steeringMmS = (g_lastPosition >= 0.0f) ?
-                             (0.70f * CAR_LINE_STEERING_LIMIT_MM_S) :
-                             (-0.70f * CAR_LINE_STEERING_LIMIT_MM_S);
+        output.steeringMmS = CAR_LINE_STEERING_POLARITY *
+            ((g_lastPosition >= 0.0f) ?
+                (0.70f * CAR_LINE_STEERING_LIMIT_MM_S) :
+                (-0.70f * CAR_LINE_STEERING_LIMIT_MM_S));
     }
     return output;
 }

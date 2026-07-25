@@ -74,6 +74,7 @@
 #define CAR_CURVE_SLOWDOWN_GAIN            (120.0f)
 
 /* 循迹首版默认使用 PD；所有参数都只是低速联调起点。 */
+#define CAR_LINE_STEERING_POLARITY         (-1.0f)
 #define CAR_LINE_KP                        (260.0f)
 #define CAR_LINE_KI                        (0.0f)
 #define CAR_LINE_KD                        (6.0f)
