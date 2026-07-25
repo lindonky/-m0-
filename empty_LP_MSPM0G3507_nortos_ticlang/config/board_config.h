@@ -3,47 +3,61 @@
 
 /*
  * @file board_config.h
- * @brief 硬件接线记录表；这里的数值目前不直接驱动寄存器。
+ * @brief SysConfig 生成符号到整车代码的集中硬件映射。
  *
- * 这些宏用于集中记录接线和外设分配，避免接线信息散落在业务代码中。当前统一
- * 设为 CAR_PIN_UNASSIGNED。完成 empty.syscfg 后，应把实际资源记录在此文件，并
- * 在相应 bsp_*.c 中使用 ti_msp_dl_config.h 生成的符号完成 DriverLib 调用。
- *
- * 本记录表暂定端口编号：0=GPIOA，1=GPIOB。编号只用于文档，不应直接强转成
- * GPIO_Regs 指针。
+ * 业务层不直接使用 SysConfig 实例名，所有硬件名字先在这里变成 CAR_* 别名。
+ * 将来换引脚或重命名实例时，优先只改 empty.syscfg 和本文件，避免改动控制算法。
+ * 本文件引用的实例、端口和引脚符号均由 ti_msp_dl_config.h 自动生成。
  */
 #define CAR_PIN_UNASSIGNED                  (0xFFFFFFFFUL)
 
-/* TB6612：A 通道驱动左轮，B 通道驱动右轮；若实物相反，应同时修改记录和 BSP。 */
-#define CAR_TB6612_PWMA_TIMER_INDEX         CAR_PIN_UNASSIGNED
-#define CAR_TB6612_PWMA_CC_INDEX            CAR_PIN_UNASSIGNED
-#define CAR_TB6612_AIN1_GPIO_PORT           CAR_PIN_UNASSIGNED
-#define CAR_TB6612_AIN1_GPIO_PIN            CAR_PIN_UNASSIGNED
-#define CAR_TB6612_AIN2_GPIO_PORT           CAR_PIN_UNASSIGNED
-#define CAR_TB6612_AIN2_GPIO_PIN            CAR_PIN_UNASSIGNED
+/*
+ * TB6612FNG：A 通道驱动左轮，B 通道驱动右轮。
+ * TIMG12 在当前 80 MHz 时钟树下直接使用 80 MHz BUSCLK；LOAD=4000，因此
+ * PWM=80 MHz/4000=20 kHz。向下计数 PWM 的 0% 对应 CC=LOAD，100% 对应 CC=0。
+ */
+#ifndef CAR_TB6612_READY
+#define CAR_TB6612_READY                    (1U)
+#endif
 
-#define CAR_TB6612_PWMB_TIMER_INDEX         CAR_PIN_UNASSIGNED
-#define CAR_TB6612_PWMB_CC_INDEX            CAR_PIN_UNASSIGNED
-#define CAR_TB6612_BIN1_GPIO_PORT           CAR_PIN_UNASSIGNED
-#define CAR_TB6612_BIN1_GPIO_PIN            CAR_PIN_UNASSIGNED
-#define CAR_TB6612_BIN2_GPIO_PORT           CAR_PIN_UNASSIGNED
-#define CAR_TB6612_BIN2_GPIO_PIN            CAR_PIN_UNASSIGNED
-
-#define CAR_TB6612_STBY_GPIO_PORT           CAR_PIN_UNASSIGNED
-#define CAR_TB6612_STBY_GPIO_PIN            CAR_PIN_UNASSIGNED
+#if CAR_TB6612_READY
+#define CAR_TB6612_PWM_INST                 (MOTOR_PWM_INST)
+#define CAR_TB6612_PWM_A_CC_INDEX           (GPIO_MOTOR_PWM_C0_IDX)
+#define CAR_TB6612_PWM_B_CC_INDEX           (GPIO_MOTOR_PWM_C1_IDX)
+#define CAR_TB6612_PWM_PERIOD_COUNTS        (4000U)
 #define CAR_TB6612_PWM_FREQUENCY_HZ         (20000UL)
 
-/* 正交编码器 A/B 相；优先为每个车轮分配一个硬件 QEI 定时器。 */
-#define CAR_ENCODER_LEFT_TIMER_INDEX        CAR_PIN_UNASSIGNED
-#define CAR_ENCODER_LEFT_A_GPIO_PORT        CAR_PIN_UNASSIGNED
-#define CAR_ENCODER_LEFT_A_GPIO_PIN         CAR_PIN_UNASSIGNED
-#define CAR_ENCODER_LEFT_B_GPIO_PORT        CAR_PIN_UNASSIGNED
-#define CAR_ENCODER_LEFT_B_GPIO_PIN         CAR_PIN_UNASSIGNED
-#define CAR_ENCODER_RIGHT_TIMER_INDEX       CAR_PIN_UNASSIGNED
-#define CAR_ENCODER_RIGHT_A_GPIO_PORT       CAR_PIN_UNASSIGNED
-#define CAR_ENCODER_RIGHT_A_GPIO_PIN        CAR_PIN_UNASSIGNED
-#define CAR_ENCODER_RIGHT_B_GPIO_PORT       CAR_PIN_UNASSIGNED
-#define CAR_ENCODER_RIGHT_B_GPIO_PIN        CAR_PIN_UNASSIGNED
+#define CAR_TB6612_AIN1_GPIO_PORT           (AIN1_PORT)
+#define CAR_TB6612_AIN1_GPIO_PIN            (AIN1_PIN_0_PIN)
+#define CAR_TB6612_AIN2_GPIO_PORT           (AIN2_PORT)
+#define CAR_TB6612_AIN2_GPIO_PIN            (AIN2_PIN_1_PIN)
+#define CAR_TB6612_BIN1_GPIO_PORT           (BIN1_PORT)
+#define CAR_TB6612_BIN1_GPIO_PIN            (BIN1_PIN_2_PIN)
+#define CAR_TB6612_BIN2_GPIO_PORT           (BIN2_PORT)
+#define CAR_TB6612_BIN2_GPIO_PIN            (BIN2_PIN_3_PIN)
+#define CAR_TB6612_STBY_GPIO_PORT           (STBY_PORT)
+#define CAR_TB6612_STBY_GPIO_PIN            (STBY_PIN_4_PIN)
+#endif
+
+/*
+ * 编码器：左轮 PB6/PB7 由 TIMG8 的 2-input QEI 硬件计数；右轮 PB8/PB9
+ * 由 GPIO 双边沿中断软件 AB 解码。MSPM0G3507 的 GPIOB 向量属于共享 GROUP1，
+ * 因此 ISR 名必须是 GROUP1_IRQHandler，不能写成 GPIOB_IRQHandler。
+ */
+#ifndef CAR_ENCODER_READY
+#define CAR_ENCODER_READY                   (1U)
+#endif
+
+#if CAR_ENCODER_READY
+#define CAR_ENCODER_LEFT_QEI_INST           (LEFT_ENCODER_QEI_INST)
+
+#define CAR_ENCODER_RIGHT_GPIO_PORT         (RIGHT_ENCODER_GPIO_PORT)
+#define CAR_ENCODER_RIGHT_A_GPIO_PIN        (RIGHT_ENCODER_GPIO_A_PIN)
+#define CAR_ENCODER_RIGHT_B_GPIO_PIN        (RIGHT_ENCODER_GPIO_B_PIN)
+#define CAR_ENCODER_RIGHT_IRQN              (RIGHT_ENCODER_GPIO_INT_IRQN)
+#define CAR_ENCODER_RIGHT_GROUP_IIDX        (RIGHT_ENCODER_GPIO_INT_IIDX)
+#define CAR_ENCODER_GROUP_IRQ_HANDLER       GROUP1_IRQHandler
+#endif
 
 /*
  * 八路模拟循迹阵列：使用 ADC0 和 ADC1 的两个非重复序列采集真实 12 位模拟量。
@@ -149,7 +163,7 @@
 #define CAR_IMU_UART_BAUD_RATE              (115200UL)
 
 #if CAR_IMU_UART_READY
-/* TODO：若 SysConfig 生成名不同，只修改以下三个别名和中断入口别名。 */
+/* 若以后修改 SysConfig 实例名，只需要同步下面三个别名和中断入口别名。 */
 #ifndef CAR_IMU_UART_INST
 #define CAR_IMU_UART_INST                   (IMU_UART_INST)
 #endif
@@ -177,7 +191,8 @@
 #define CAR_OLED_I2C_ADDRESS_7BIT            (0x3CU)
 #endif
 #ifndef CAR_OLED_SOFT_I2C_DELAY_CYCLES
-#define CAR_OLED_SOFT_I2C_DELAY_CYCLES       (40U)
+/* 32 MHz 时实物验证值为 40 cycles；按 CPUCLK 等比例换算，80 MHz 时为 100。 */
+#define CAR_OLED_SOFT_I2C_DELAY_CYCLES       (CPUCLK_FREQ / 800000UL)
 #endif
 
 #if CAR_OLED_SOFT_I2C_READY

@@ -3,6 +3,7 @@
 app/app_debug.o: ../app/app_debug.c \
  C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/app/app_debug.h \
  C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/app/app_car.h \
+ C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/bsp/bsp_encoder.h \
  C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/bsp/bsp_line_adc.h \
  C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/config/car_config.h \
  C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/bsp/bsp_time.h \
@@ -19,6 +20,7 @@ app/app_debug.o: ../app/app_debug.c \
  C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/drivers/oled_data.h
 C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/app/app_debug.h:
 C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/app/app_car.h:
+C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/bsp/bsp_encoder.h:
 C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/bsp/bsp_line_adc.h:
 C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/config/car_config.h:
 C:/ti/workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/bsp/bsp_time.h:

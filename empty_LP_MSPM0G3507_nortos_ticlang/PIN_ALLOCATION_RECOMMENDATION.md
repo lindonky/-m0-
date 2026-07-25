@@ -182,23 +182,22 @@ UART3，因此 UART0 给 IMU、UART1 给 HC-05 并不意味着串口已经用完
 预留不等于现在必须在原工程中添加实例。若暂时不用，文档和接线层面不分配这些脚
 即可；以后启用时再通过 SysConfig 添加并检查全局冲突。
 
-## 7. 仍未最终分配的资源
+## 7. 已完成的电机和编码器资源
 
-八路 ADC、现有两个串口、备用 I2C 和备用 UART 确定后，以下资源仍需要结合
-SysConfig 的定时器路由统一决定：
+八路 ADC、两个串口、备用 I2C/UART 固定后，电机与编码器也已经完成最终分配：
 
-| 功能 | 需求 | 当前建议 |
+| 功能 | 最终资源 | 状态 |
 |---|---|---|
-| TB6612 PWMA/PWMB | 两路硬件 PWM | 优先同一定时器两个 CC，目标 20 kHz；避开 PB4 |
-| TB6612 AIN1/AIN2/BIN1/BIN2 | 四路普通输出 | 最后从无板载负载 GPIO 中选择 |
-| TB6612 STBY | 一路普通输出 | 上电及初始化阶段保持低，初始化完成再主动拉高 |
-| 左右编码器 | 两组 A/B，共四路 | 优先两个硬件 QEI；同时检查 J12 焊接和引出状态 |
+| TB6612 PWMA/PWMB | TIMG12 CCP0=PB13、CCP1=PA31 | 80 MHz/4000=20 kHz，生成通过 |
+| TB6612 AIN1/AIN2/BIN1/BIN2 | PB0/PB1/PB12/PB20 | GPIO 输出，初始低 |
+| TB6612 STBY | PA28 | GPIO 输出，初始低；只在明确启动时释放 |
+| 左编码器 | TIMG8 QEI，PB6/PB7 | 2-input QEI，LOAD=65535 |
+| 右编码器 | GPIOB PB8/PB9 | 双边沿中断，`GROUP1_IRQHandler` 软件 AB 解码 |
 | 1 ms 系统时基 | TIMG0 / `TICK_TIMER` | 已配置为 1 ms Periodic ZERO 中断，不占用引脚 |
 | OLED 软件 I2C | PA12 SCL / PA13 SDA | 已正式配置；不占用 PB2/PB3，给硬件 I2C 留口 |
 
-这里不直接拍板 PWM/QEI 引脚，是因为“某引脚标有 PWM/QEI”不等于任意组合都能同时
-映射到合适的 Timer/CC 实例。后续应把 ADC、UART、I2C 和已占用的 TIMG0 作为固定
-约束，再一次性选择两路 PWM 与两组 QEI，以免局部可用、整体冲突。
+该方案仍完整保留 I2C1 PB2/PB3 和 UART2 PB15/PB16。理论编码器一圈计数为
+`13×30×4=1560`，但方向符号和准确计数都必须通过手转车轮一整圈实测后再确认。
 
 ## 8. 建议避开的引脚
 
@@ -255,9 +254,11 @@ PA10/PA11 已用于 IMU 且涉及 J21/J22 路由；PB4/PB5 已用于 HC-05。它
 ADC 真分支先用临时 SysConfig 自动生成宏做过严格编译验证；随后用户已经在原工程
 `empty.syscfg` 中正式加入 `LINE_ADC0`、`LINE_ADC1`，并恢复 IMU UART0 与 HC-05
 UART1。随后又正式加入 `OLED_GPIO`：PA12=SCL、PA13=SDA、Initial Set、Hi-Z Enable。
-这些实例同时保存且无 PinMux 冲突；`CAR_LINE_ADC_READY` 和
-`CAR_OLED_SOFT_I2C_READY` 均已正式启用为 `1U`。下一步是实物电压、左右顺序、
-黑白极性、OLED ACK/波形、动态标定和电机干扰验证。
+这些实例以及 TIMG12 PWM、TIMG8 QEI、右编码器 GPIO 同时保存且无 PinMux 冲突；
+`CAR_LINE_ADC_READY`、`CAR_OLED_SOFT_I2C_READY`、`CAR_TB6612_READY` 和
+`CAR_ENCODER_READY` 均已正式启用为 `1U`。用户已经用 OLED 确认八路 ADC 从左到右
+对应索引 0～7，OLED 也已正常显示。CPU 改为 80 MHz 后软件 I2C 延时已经按主频自动
+换算为 100 cycles，仍需再观察显示和 SCL 波形。电机与编码器尚未通电台架验证。
 
 本文不要求也不引入任何休眠、WFI、Standby 或低功耗流程。ADC 采样和主循环均按
 电赛实时控制思路持续运行。

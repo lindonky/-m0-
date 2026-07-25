@@ -82,7 +82,7 @@ Periodic Down Counting，并只启用 ZERO 中断。SysConfig 保持 Counter 停
 TICK_TIMER_INST
 TICK_TIMER_INST_INT_IRQN
 TICK_TIMER_INST_IRQHandler
-TICK_TIMER_INST_LOAD_VALUE /* 32 MHz 下为 31999U。 */
+TICK_TIMER_INST_LOAD_VALUE /* 当前 40 MHz BUSCLK 下为 39999U，仍是 1 ms。 */
 ```
 
 真实中断入口由 `bsp/bsp_time.c` 实现，核心行为只有：
@@ -106,14 +106,11 @@ void TICK_TIMER_INST_IRQHandler(void)
 验收：UART 遥测的第一列应每毫秒递增，长时间运行不停止；1 秒实测计数增量应接近
 1000。当前已完成配置和编译验证，仍需下载后用 Watch/HC-05 验证实际节拍。
 
-## 5. 左右 QEI 编码器
+## 5. 左硬件 QEI + 右软件 AB 编码器
 
-优先为每个轮子分配一个硬件 QEI 定时器：
-
-- 左编码器 A/B；
-- 右编码器 A/B；
-- 确认最大计数频率小于定时器输入能力；
-- 若计数器位宽不足，使用溢出 ISR 扩展为 32 位。
+最终资源已经固定：左编码器使用 TIMG8、PB6/PB7 的 2-input QEI；右编码器使用
+GPIOB PB8/PB9 双边沿中断和四状态查表。右编码器必须实现共享向量
+`GROUP1_IRQHandler()`，不能使用不存在的 `GPIOB_IRQHandler()`。
 
 参考 SDK：
 
@@ -121,11 +118,8 @@ void TICK_TIMER_INST_IRQHandler(void)
 examples/nortos/LP_MSPM0G3507/driverlib/timg_qei_mode
 ```
 
-在 `bsp/bsp_encoder.c` 完成：
-
-- 启动 QEI；
-- 返回左右当前计数；
-- 复位硬件计数和软件扩展计数。
+`bsp/bsp_encoder.c` 已完成：左 16 位相邻差值扩展为 32 位累计计数；右 ISR 查表
+±1；复位时原子清理硬件/软件状态；诊断接口暴露右轮边沿中断和非法跳变数。
 
 验收方法：
 
@@ -541,3 +535,39 @@ TB6612 的短时峰值能力当成可持续电流；调试时应限制占空比�
 
 整个工程明确不使用 MCU 睡眠、WFI、Standby 或低功耗策略。TB6612 的 STBY 只是
 电机驱动使能信号，与 MCU 低功耗无关。
+
+## 13. 当前最终资源与 BSP 实现（2026-07-25）
+
+当前正式配置已不再是占位方案：
+
+```text
+CPUCLK/MCLK = 80 MHz，ULPCLK = 40 MHz
+TB6612 PWM  = TIMG12，PB13/CCP0 + PA31/CCP1，Period=4000，20 kHz
+TB6612 GPIO = PB0/PB1/PB12/PB20，STBY=PA28
+左编码器    = TIMG8 QEI，PB6/PB7
+右编码器    = GPIOB PB8/PB9，两脚双边沿，GROUP1_IRQHandler
+```
+
+`bsp_tb6612.c` 已实现真实 GPIO/PWM 写入。初始化顺序固定为：停止 TIMG12、STBY 低、
+四根方向线低、两通道 0%、启动 TIMG12；启动 PWM 计数器不等于启用电机，因为 STBY
+保持低。向下计数 PWM 使用：
+
+```c
+compare = period - (period * dutyPermille / 1000);
+```
+
+因此 0% 对应 Compare=4000，100% 对应 Compare=0。
+
+`bsp_encoder.c` 已实现左轮 16 位 QEI 的软件 32 位累计扩展，以及右轮四状态查表。
+右轮 ISR 只分派 GPIOB、清 pending、采样 AB、查表增减并更新诊断计数，不做 PID、
+OLED、UART、浮点或延时。OLED 诊断现在完整轮换两套 8 页画面：ADC/循迹页和
+电机/编码器页；只在 8 页边界切换，避免一轮刷新混合两种内容。
+
+80 MHz 后 OLED 位延时不再写死为 40，而是按：
+
+```c
+CPUCLK_FREQ / 800000UL
+```
+
+自动换算；在 80 MHz 下为 100 cycles，与原 32 MHz/40 cycles 等比例。这个值只能
+作为起点，仍应通过实物显示和示波器 SCL 波形复测。

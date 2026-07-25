@@ -51,7 +51,7 @@
 #define CAR_ENCODER_COUNTS_PER_WHEEL_REV   (CAR_MOTOR_ENCODER_PPR * \
                                              CAR_MOTOR_GEAR_RATIO * \
                                              CAR_ENCODER_QUADRATURE_FACTOR)
-#define CAR_ENCODER_LEFT_POLARITY          (+1)
+#define CAR_ENCODER_LEFT_POLARITY          (-1)
 #define CAR_ENCODER_RIGHT_POLARITY         (+1)
 
 /* 八路真实模拟循迹阵列；公开数组始终按车辆物理最左侧到最右侧排列。 */

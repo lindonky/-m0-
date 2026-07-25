@@ -79,9 +79,9 @@ SysConfig GUI 确认并正式配置 ADC、UART、1 ms Timer 和 OLED GPIO。
 | 模块 | 状态 | 是否可直接上硬件 | 说明 |
 |---|---|---:|---|
 | 工程分层和配置文件 | 已完成 | 是 | 参数集中管理 |
-| TB6612 上层逻辑 | 已完成 | BSP 完成后可用 | A/B 通道、方向、刹车、滑行 |
-| 电机控制 | 已完成 | BSP 完成后可用 | 极性、限幅、斜坡、死区、安全停机 |
-| 编码器数学处理 | 已完成 | QEI BSP 完成后可用 | 速度、RPM、距离、滤波 |
+| TB6612 上层逻辑 | 已完成 | 等待台架验证 | A/B 通道、方向、刹车、滑行，真实 GPIO/PWM BSP 已接入 |
+| 电机控制 | 已完成 | 等待台架验证 | 极性、限幅、斜坡、死区、安全停机 |
+| 编码器数学处理 | 已完成 | 等待台架验证 | 左硬件 QEI、右软件 AB、速度、RPM、距离、滤波 |
 | 循迹算法 | 已完成首版 | 等待上板验证 | 真实模拟量、标定、质心、丢线 |
 | 通用 PID | 已完成 | 是 | 仍需实车调参 |
 | 左右速度闭环 | 已完成首版 | 编码器接入后可用 | 默认参数只是起点 |
@@ -92,11 +92,11 @@ SysConfig GUI 确认并正式配置 ADC、UART、1 ms Timer 和 OLED GPIO。
 | HC-05 调试 UART 应用协议 | 已完成 | 等待上板验证 | R/S/X/C/E/G/I 和 CSV |
 | HC-05 调试 UART 底层 | 软件、SysConfig、构建已通过 | 等待上板验证 | UART1、PB4/PB5、FIFO/ISR |
 | IMU UART 底层 | 软件、SysConfig、构建已通过 | 等待上板验证 | UART0、PA10/PA11、RX/TX 环形缓冲 |
-| PWM/GPIO 底层 | 未实现 | 否 | 需要 SysConfig 符号 |
-| QEI 底层 | 未实现 | 否 | 需要左右 QEI 资源 |
+| PWM/GPIO 底层 | 已实现 | 等待台架验证 | TIMG12 PB13/PA31、20 kHz；五根控制线已映射 |
+| 编码器底层 | 已实现 | 等待台架验证 | TIMG8 PB6/PB7 + GPIOB PB8/PB9、GROUP1 ISR |
 | 八路循迹 ADC BSP | 软件、SysConfig 已完成 | 等待上板验证 | ADC0 3路 + ADC1 5路、非阻塞完整帧 |
 | 500 Hz 串口 IMU | 协议完成 | UART 配置后可用 | 9 字节帧、CRC、回绕、超时、标定 |
-| SSD1306 OLED 驱动 | 软件和 GPIO 已接入 | 等待上板 ACK | PA12/PA13、128×64、0x3C、分行诊断刷新 |
+| SSD1306 OLED 驱动 | 软件、GPIO和实物显示已通过 | 80 MHz 后待复测 | PA12/PA13、0x3C、ADC与电机/编码器双诊断画面 |
 | 按键、电池、Flash | 未实现 | 否 | 后续增强项 |
 | 十字/环岛/停车线 | 未实现 | 否 | 依赛题规则开发 |
 
@@ -111,7 +111,7 @@ SysConfig GUI 确认并正式配置 ADC、UART、1 ms Timer 和 OLED GPIO。
 |---|---:|---|
 | 软件架构和模块接口 | 100% | 分层、接口和主循环已建立并链接通过 |
 | 与引脚无关的基础算法 | 90% | 首版已实现，仍缺实车数据验证 |
-| MSPM0 外设/SysConfig 接入 | 65% | IMU、HC-05、ADC0/ADC1、TIMG0、OLED GPIO 已配置；仍缺 PWM/QEI |
+| MSPM0 外设/SysConfig 接入 | 95% | IMU、HC-05、ADC、TIMG0、OLED、PWM、QEI/右编码器 GPIO 均已配置；剩余实物验证 |
 | 电机和编码器台架验证 | 0% | 尚未连接实物 |
 | 基础速度闭环 | 30% | 软件存在，硬件未接入、参数未整定 |
 | 基础连续线循迹 | 60% | 双 ADC 已正式启用，解算和控制存在；缺传感器接线、标定与实车验证 |
@@ -389,7 +389,13 @@ PB4 在板卡资料中同时是 PWM 候选，后续给 TB6612 分配 PWM 时必�
   两脚均为 `DL_GPIO_HIZ_ENABLE`、无内部电阻、低驱动强度；
 - 启用 `CAR_OLED_SOFT_I2C_READY=1` 后，`app_debug.c`、`app_scheduler.c`、
   `bsp_oled_soft_i2c.c`、`oled.c` 已使用正式生成头和器件选项完成 TI Arm Clang
-  单文件编译检查；完整原工程 Clean Build 仍应在同步后再次执行；
+  单文件编译检查；随后 9 个代码/文档文件已通过 SHA-256 核对同步到原工程；
+- OLED 接入后执行 `gmake clean` 与 `gmake -j4 all`，SysConfig 重新生成、24 个应用
+  C 源文件编译和最终链接全部成功；最终 ELF 为 322352 字节，map 报告 Flash 实际
+  使用 `0x61D0`（25040 字节）、SRAM 区域使用 `0x0B55`（2901 字节）；
+- 最终 map 同时包含 `ADC0_IRQHandler`、`ADC1_IRQHandler`、`TIMG0_IRQHandler`、
+  `UART0_IRQHandler`、`UART1_IRQHandler`，以及 `App_Debug_OLEDTask`、`OLED_Init`、
+  `OLED_UpdateArea` 和四个软件 I2C BSP 函数；
 - 真实原工程构建已触发 SysConfig 重新生成并完整链接成功；生成结果明确为
   `HC05_UART_INST=UART1`、`UART1_IRQHandler`、RX=GPIOB/PB5、TX=GPIOB/PB4，
   115200 baud、FIFO 和 RX one-entry threshold；
@@ -436,9 +442,10 @@ PB4 在板卡资料中同时是 PWM 候选，后续给 TB6612 分配 PWM 时必�
 
 - MG513 标称堵转电流约 2.8 A，明显高于 TB6612 常用约 1.2 A/通道连续能力；
   虽然峰值规格可能短时覆盖，但堵转会快速发热，必须避免长时间堵转并考虑硬件保护；
-- PWM/GPIO/QEI BSP 仍是安全占位，当前下载后不会驱动电机；八路模拟 ADC 已在
-  SysConfig 中正式配置并由 `CAR_LINE_ADC_READY=1` 启用，但尚未接传感器实测；
-- 没有硬件数据就无法验证循迹极性和权重方向；
+- PWM/GPIO/编码器 BSP 已接入真实资源，但尚未完成电机和编码器台架验证；上电默认
+  仍保持 STBY 低、方向低、PWM 0%，不会自动运行；
+- 八路 ADC 左到右 0～7 和 OLED 显示已经实物确认；黑白极性、动态标定和电机干扰
+  工况仍需验证；
 - 默认 PID 未经实车调节；
 - 编码器速度滤波系数固定在源码中；
 - 循迹路口判断只是基于活跃通道数量的初步启发式；
@@ -450,7 +457,8 @@ PB4 在板卡资料中同时是 PWM 候选，后续给 TB6612 分配 PWM 时必�
   输入 MSPM0 ADC；
 - 推荐 ADC 方案只有 PA22 涉及板载光线传感器，使用前必须确认/断开 J16；
 - 标定结果只保存在 RAM，上电后丢失；
-- OLED 已按 128×64 SSD1306/0x3C 移植并配置 PA12/PA13，但尚未上板确认 ACK；
+- OLED 已按 128×64 SSD1306/0x3C 移植，并在 PA12/PA13 上实物显示正常；CPU 改为
+  80 MHz 后位延时已自动换算，仍需复测显示稳定性和 SCL 波形；
 - OLED 使用同步软件 I2C，完整 1 KiB 刷新不能放进实时控制路径；当前每 100 ms
   只更新一页，正式竞速前仍要测量单页耗时并评估是否进一步降频或关闭显示；
 - 串口 IMU 已配置 UART0、PA10 TX、PA11 RX，但尚未上板确认 J21/J22 路由、CRC、
@@ -626,3 +634,73 @@ app -> control/drivers -> bsp -> SysConfig/DriverLib -> hardware
 板卡图片上的“UART/PWM/ADC/SPI”等文字是接口常用角色，不等同于芯片完整复用表；
 Excel 中的“可以使用”也只表示板级条件允许。最终能否组合为同一个外设实例，必须
 以当前封装下 SysConfig 的无冲突结果为准。
+
+## 18. 2026-07-25 最终电机、编码器和 80 MHz 接入记录
+
+### 18.1 本轮已经完成的代码
+
+- `config/board_config.h`：正式启用 `CAR_TB6612_READY=1`、
+  `CAR_ENCODER_READY=1`，把 TIMG12、五根 TB6612 GPIO、TIMG8 QEI 和右编码器
+  GPIOB 生成宏集中映射为 `CAR_*` 别名；
+- `bsp/bsp_tb6612.c`：实现安全初始化、STBY、两组方向脚和 0～1000 千分比 PWM；
+- `bsp/bsp_encoder.c/.h`：实现左轮 16 位 QEI 软件扩展、右轮 PB8/PB9 双边沿 AB
+  查表、共享 `GROUP1_IRQHandler()` 分派、原子复位和诊断快照；
+- `app/app_debug.c`：OLED 增加电机/编码器诊断画面，显示累计/周期计数、轮速、
+  速度目标、电机目标/实际占空比、使能、右轮 IRQ 和非法跳变；
+- `bsp/bsp_board.c`：移除已经过期的重复启动 TODO，明确每个 BSP 独立负责启动；
+- OLED 软件 I2C 延时改为 `CPUCLK_FREQ/800000`，80 MHz 下自动得到 100 cycles。
+
+### 18.2 已核对的正式资源
+
+| 功能 | 最终配置 |
+|---|---|
+| 主时钟 | MCLK/CPUCLK 80 MHz，ULPCLK 40 MHz |
+| 左 PWM | TIMG12 CCP0，PB13，20 kHz |
+| 右 PWM | TIMG12 CCP1，PA31，20 kHz |
+| TB6612 方向/STBY | PB0、PB1、PB12、PB20、PA28，均初始低 |
+| 左编码器 | TIMG8 QEI，PB6/PB7，LOAD=65535 |
+| 右编码器 | GPIOB PB8/PB9，双边沿，Group 1 共享中断 |
+| 理论计数 | `13 PPR × 30 × 4 = 1560 count/输出轴一圈` |
+
+TIMG12 实际使用 80 MHz，不是 ULPCLK 40 MHz，所以 Period=4000 才是 20 kHz。
+TIMG0 和两个 UART 使用 40 MHz，SysConfig 已分别重算为 1 ms 和约 115190.78 baud。
+
+### 18.3 证据等级与仍未完成内容
+
+当前 SysConfig CLI 已生成并确认真实宏、PinMux、80 MHz 时钟树和 GROUP1 IIDX。
+2026-07-25 已把本轮 10 个预期文件同步至正式工程，并在正式 `Debug` 目录执行：
+
+```text
+gmake clean
+gmake -j4 all
+```
+
+构建退出码为 0，没有编译器或链接器 Warning/Error，成功生成新的 `.out`、`.hex` 和
+`.map`。Clean 后的正式 `ti_msp_dl_config.h` 已确认：
+
+```text
+CPUCLK_FREQ                     = 80000000
+MOTOR_PWM_INST_CLK_FREQ         = 80000000
+TICK_TIMER_INST_LOAD_VALUE      = 39999
+IMU_UART_INST_FREQUENCY         = 40000000
+HC05_UART_INST_FREQUENCY        = 40000000
+```
+
+map 中已确认 `GROUP1_IRQHandler`、`ADC0_IRQHandler`、`ADC1_IRQHandler`、
+`TIMG0_IRQHandler`、`UART0_IRQHandler`、`UART1_IRQHandler`，以及全部 TB6612/
+Encoder BSP 函数均由真实对象文件提供。源码调用扫描未发现 `__WFI`、Sleep、STOP、
+STANDBY 或 SHUTDOWN 入口。本轮证据等级已达到“SysConfig 生成、目标编译、链接通过”；
+尚不能替代下面的台架和实车验证。
+
+上板仍待完成：
+
+1. 不接电机主电源，测 STBY=低、四根方向线=低、两路 PWM 初始 0%；
+2. 明确启动后测 PB13/PA31 均为 20 kHz，并核对占空比；
+3. 确认编码器 A/B 高电平不超过 3.3 V；
+4. 手转左轮和右轮，检查 OLED 计数连续、方向正确、ERR 不增长；
+5. 每只输出轴完整转一圈，确认是否约 1560 count；
+6. 车轮悬空后再接电机主电源，以低占空比逐轮开环测试；
+7. 最后才进入速度 PID 和循迹联调。
+
+任何实物方向相反，优先修改 `CAR_MOTOR_LEFT/RIGHT_POLARITY` 或
+`CAR_ENCODER_LEFT/RIGHT_POLARITY`，不要在控制算法各处散落负号。

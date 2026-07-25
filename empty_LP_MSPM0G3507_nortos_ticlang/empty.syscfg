@@ -23,8 +23,11 @@ const GPIO3  = GPIO.addInstance();
 const GPIO4  = GPIO.addInstance();
 const GPIO5  = GPIO.addInstance();
 const GPIO6  = GPIO.addInstance();
+const GPIO7  = GPIO.addInstance();
 const PWM    = scripting.addModule("/ti/driverlib/PWM", {}, false);
 const PWM1   = PWM.addInstance();
+const QEI    = scripting.addModule("/ti/driverlib/QEI", {}, false);
+const QEI1   = QEI.addInstance();
 const SYSCTL = scripting.addModule("/ti/driverlib/SYSCTL");
 const TIMER  = scripting.addModule("/ti/driverlib/TIMER", {}, false);
 const TIMER1 = TIMER.addInstance();
@@ -35,6 +38,21 @@ const UART2  = UART.addInstance();
 /**
  * Write custom configuration values to the imported modules.
  */
+const divider6       = system.clockTree["PLL_CLK2X_DIV"];
+divider6.divideValue = 4;
+
+const divider7       = system.clockTree["PLL_PDIV"];
+divider7.divideValue = 2;
+
+const divider9       = system.clockTree["UDIV"];
+divider9.divideValue = 2;
+
+const multiplier2         = system.clockTree["PLL_QDIV"];
+multiplier2.multiplyValue = 10;
+
+const mux8       = system.clockTree["HSCLKMUX"];
+mux8.inputSelect = "HSCLKMUX_SYSPLL2X";
+
 ADC121.$name                      = "LINE_ADC0";
 ADC121.samplingOperationMode      = "sequence";
 ADC121.sampClkSrc                 = "DL_ADC12_CLOCK_ULPCLK";
@@ -115,25 +133,57 @@ GPIO6.$name                         = "STBY";
 GPIO6.associatedPins[0].$name       = "PIN_4";
 GPIO6.associatedPins[0].pin.$assign = "PA28";
 
+GPIO7.$name                         = "RIGHT_ENCODER_GPIO";
+GPIO7.port                          = "PORTB";
+GPIO7.associatedPins.create(2);
+GPIO7.associatedPins[0].$name       = "A";
+GPIO7.associatedPins[0].direction   = "INPUT";
+GPIO7.associatedPins[0].interruptEn = true;
+GPIO7.associatedPins[0].polarity    = "RISE_FALL";
+GPIO7.associatedPins[0].pin.$assign = "PB8";
+GPIO7.associatedPins[1].$name       = "B";
+GPIO7.associatedPins[1].direction   = "INPUT";
+GPIO7.associatedPins[1].interruptEn = true;
+GPIO7.associatedPins[1].polarity    = "RISE_FALL";
+GPIO7.associatedPins[1].pin.$assign = "PB9";
+
 PWM1.$name                              = "MOTOR_PWM";
-PWM1.timerCount                         = 1600;
+PWM1.timerCount                         = 4000;
 PWM1.peripheral.$assign                 = "TIMG12";
 PWM1.peripheral.ccp0Pin.$assign         = "PB13";
 PWM1.peripheral.ccp1Pin.$assign         = "PA31";
 PWM1.PWM_CHANNEL_0.$name                = "ti_driverlib_pwm_PWMTimerCC0";
 PWM1.PWM_CHANNEL_1.$name                = "ti_driverlib_pwm_PWMTimerCC1";
-PWM1.ccp0PinConfig.$name                = "ti_driverlib_gpio_GPIOPinGeneric12";
 PWM1.ccp0PinConfig.direction            = scripting.forceWrite("OUTPUT");
 PWM1.ccp0PinConfig.hideOutputInversion  = scripting.forceWrite(false);
 PWM1.ccp0PinConfig.onlyInternalResistor = scripting.forceWrite(false);
 PWM1.ccp0PinConfig.passedPeripheralType = scripting.forceWrite("Digital");
-PWM1.ccp1PinConfig.$name                = "ti_driverlib_gpio_GPIOPinGeneric13";
+PWM1.ccp0PinConfig.$name                = "ti_driverlib_gpio_GPIOPinGeneric12";
 PWM1.ccp1PinConfig.direction            = scripting.forceWrite("OUTPUT");
 PWM1.ccp1PinConfig.hideOutputInversion  = scripting.forceWrite(false);
 PWM1.ccp1PinConfig.onlyInternalResistor = scripting.forceWrite(false);
 PWM1.ccp1PinConfig.passedPeripheralType = scripting.forceWrite("Digital");
+PWM1.ccp1PinConfig.$name                = "ti_driverlib_gpio_GPIOPinGeneric13";
+
+QEI1.$name                              = "LEFT_ENCODER_QEI";
+QEI1.peripheral.ccp0Pin.$assign         = "PB6";
+QEI1.peripheral.ccp1Pin.$assign         = "PB7";
+QEI1.ccp0PinConfig.hideOutputInversion  = scripting.forceWrite(false);
+QEI1.ccp0PinConfig.onlyInternalResistor = scripting.forceWrite(false);
+QEI1.ccp0PinConfig.passedPeripheralType = scripting.forceWrite("Digital");
+QEI1.ccp0PinConfig.$name                = "ti_driverlib_gpio_GPIOPinGeneric14";
+QEI1.ccp1PinConfig.hideOutputInversion  = scripting.forceWrite(false);
+QEI1.ccp1PinConfig.onlyInternalResistor = scripting.forceWrite(false);
+QEI1.ccp1PinConfig.passedPeripheralType = scripting.forceWrite("Digital");
+QEI1.ccp1PinConfig.$name                = "ti_driverlib_gpio_GPIOPinGeneric15";
 
 SYSCTL.forceDefaultClkConfig = true;
+SYSCTL.validateClkStatus     = true;
+SYSCTL.SYSPLL_CLK1En         = true;
+SYSCTL.SYSPLL_CLK1Div        = 1;
+SYSCTL.SYSPLL_CLK2XEn        = true;
+SYSCTL.SYSPLL_CLK2XDiv       = 3;
+SYSCTL.clockTreeEn           = true;
 
 TIMER1.$name              = "TICK_TIMER";
 TIMER1.timerMode          = "PERIODIC";
@@ -185,4 +235,4 @@ UART2.rxPinConfig.$name                = "ti_driverlib_gpio_GPIOPinGeneric11";
 Board.peripheral.$suggestSolution          = "DEBUGSS";
 Board.peripheral.swclkPin.$suggestSolution = "PA20";
 Board.peripheral.swdioPin.$suggestSolution = "PA19";
-SYSCTL.peripheral.$suggestSolution         = "SYSCTL";
+QEI1.peripheral.$suggestSolution           = "TIMG8";

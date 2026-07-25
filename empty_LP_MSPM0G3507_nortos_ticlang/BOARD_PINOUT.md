@@ -321,13 +321,17 @@ UART3 仍未使用。
 
 ### 7.5 左右编码器
 
-Excel 在 QEI Interface 列出 PA29、PA30、PB14，且 J12 未焊接；两只 AB 相编码器
-实际需要四路输入。因此流程应是：
+最终采用“一路硬件 QEI + 一路 GPIO 软件 QEI”，已经通过正式 SysConfig 生成验证：
 
-1. 先检查 J12 实际原理图和焊接状态；
-2. 在 SysConfig 中分别尝试两个硬件 QEI 实例及各自 A/B PinMux；
-3. 若板载 QEI Interface 不足四路，再从普通引出脚选择剩余复用脚；
-4. 最后确认最大边沿频率、计数方向和溢出扩展方案。
+```text
+左轮：TIMG8 2-input QEI，PHA=PB6/CCP0，PHB=PB7/CCP1，LOAD=65535
+右轮：GPIOB，A=PB8，B=PB9，两脚均为双边沿中断
+```
+
+右轮 GPIOB 属于 MSPM0G3507 的共享中断组 1，真正向量入口为
+`GROUP1_IRQHandler()`，不是 `GPIOB_IRQHandler()`。ISR 通过 Group 1 IIDX 确认
+GPIOB 来源，再读取并清除 PB8/PB9 pending，采样 AB 状态并查表 ±1。当前理论每个
+输出轴一圈为 `13 PPR × 30 × 4 = 1560 count`，仍必须手转一整圈实测复核。
 
 ### 7.6 OLED 和 TB6612 普通 GPIO
 
@@ -347,9 +351,9 @@ QEI 和 ADC 分配完成后再选普通 GPIO。选择原则：
 3. 保留并验证 HC-05 UART1/PB4/PB5，确认 PB5 实物引出并从 PWM 候选中移除 PB4；
 4. 固定八路 ADC 的 3+5 分组，处理 PA22/J16，并验证每路输入不超过 3.3 V；
 5. 保留 I2C1/PB2/PB3 和 UART2/PB15/PB16，避免后续无接口可用；
-6. 为两只编码器选择两个 QEI A/B 组合；
-7. 为 TB6612 选择两路 PWM，明确避开已经占用的 TIMG0；
-8. 最后分配 TB6612 五个普通 GPIO 和 OLED 两个软件 I2C GPIO；
+6. 已固定左 TIMG8 QEI PB6/PB7 与右 GPIOB PB8/PB9 软件 AB；
+7. 已固定 TB6612 TIMG12 PB13/PA31 两路 20 kHz PWM；
+8. 已固定 TB6612 五个 GPIO 和 OLED PA12/PA13 软件 I2C；
 9. 把每个最终选择写入下面的正式记录表和 `config/board_config.h`；
 10. 保存 SysConfig，核对生成宏，Clean + Build；
 11. 用万用表/示波器/逻辑分析仪逐项上板确认。
@@ -362,13 +366,13 @@ QEI 和 ADC 分配完成后再选普通 GPIO。选择原则：
 | IMU | RX <- IMU TX | PA11 | UART0 RX | J22 待确认 | 待验证 |
 | HC-05 | TX -> HC-05 RX | PB4 | UART1 / `HC05_UART` TX | BoosterPack | 生成/构建通过，待实物 |
 | HC-05 | RX <- HC-05 TX | PB5 | UART1 / `HC05_UART` RX | 下方未焊接区 | 生成/构建通过，待实物 |
-| TB6612 | PWMA | 待定 | PWM/CC 待定 | 待定 | 待验证 |
-| TB6612 | PWMB | 待定 | PWM/CC 待定 | 待定 | 待验证 |
-| TB6612 | AIN1/AIN2 | 待定 | GPIO | 待定 | 待验证 |
-| TB6612 | BIN1/BIN2 | 待定 | GPIO | 待定 | 待验证 |
-| TB6612 | STBY | 待定 | GPIO | 待定 | 待验证 |
-| 左编码器 | A/B | 待定 | QEI 待定 | 待定 | 待验证 |
-| 右编码器 | A/B | 待定 | QEI 待定 | 待定 | 待验证 |
+| TB6612 | PWMA（左） | PB13 | TIMG12 CCP0 / `MOTOR_PWM` C0 | BoosterPack | 生成通过，待测 20 kHz |
+| TB6612 | PWMB（右） | PA31 | TIMG12 CCP1 / `MOTOR_PWM` C1 | BoosterPack | 生成通过，待测 20 kHz |
+| TB6612 | AIN1/AIN2 | PB0/PB1 | `AIN1`/`AIN2` GPIO | BoosterPack | 初始低，待实物 |
+| TB6612 | BIN1/BIN2 | PB12/PB20 | `BIN1`/`BIN2` GPIO | BoosterPack | 初始低，待实物 |
+| TB6612 | STBY | PA28 | `STBY` GPIO | BoosterPack | 初始低，待实物 |
+| 左编码器 | A/B | PB6/PB7 | TIMG8 CCP0/CCP1 / `LEFT_ENCODER_QEI` | BoosterPack | 生成通过，待一圈实测 |
+| 右编码器 | A/B | PB8/PB9 | `RIGHT_ENCODER_GPIO` 双边沿 | BoosterPack | 生成通过，待一圈实测 |
 | 循迹 CH0（最左） | 模拟输出 | PA25 | ADC0.2 / MEM0 | BoosterPack | PinMux 已验证，待实物 |
 | 循迹 CH1 | 模拟输出 | PA24 | ADC0.3 / MEM1 | BoosterPack | PinMux 已验证，待实物 |
 | 循迹 CH2 | 模拟输出 | PA22 | ADC0.7 / MEM2 | J16 | 需断开/确认 J16 |
@@ -379,8 +383,12 @@ QEI 和 ADC 分配完成后再选普通 GPIO。选择原则：
 | 循迹 CH7（最右） | 模拟输出 | PB19 | ADC1.6 / MEM4 | BoosterPack | PinMux 已验证，待实物 |
 | 预留 I2C | SCL/SDA | PB2/PB3 | I2C1 / `SPARE_I2C` | BoosterPack | PinMux 已验证，尚未加入原工程 |
 | 预留 UART | TX/RX | PB15/PB16 | UART2 / `SPARE_UART` | BoosterPack | PinMux 已验证，尚未加入原工程 |
-| OLED | SCL/SDA | PA12/PA13 | `OLED_GPIO` 普通 GPIO/软件 I2C | 模块自带或 4.7 kΩ 到 3.3 V | 配置/编译待上板 ACK |
+| OLED | SCL/SDA | PA12/PA13 | `OLED_GPIO` 普通 GPIO/软件 I2C | 模块自带或 4.7 kΩ 到 3.3 V | 已实物显示正常；80 MHz 后待复测 |
 | 系统 | 1 ms tick | 无外接 | TIMG0 / `TICK_TIMER` | 无 | 配置和编译通过，待校时 |
+
+当前系统时钟为 CPUCLK/MCLK 80 MHz、ULPCLK 40 MHz。TIMG12 使用 80 MHz BUSCLK，
+PWM Period=4000 正好得到 20 kHz；TIMG0 使用 40 MHz BUSCLK，LOAD=39999 仍为精确
+1 ms。不要因为 ULPCLK 是 40 MHz 就把 TIMG12 Period 错改成 2000。
 
 ## 10. 每次改引脚后的核对清单
 
