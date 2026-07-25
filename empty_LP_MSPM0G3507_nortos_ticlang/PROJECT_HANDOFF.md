@@ -704,3 +704,41 @@ STANDBY 或 SHUTDOWN 入口。本轮证据等级已达到“SysConfig 生成、�
 
 任何实物方向相反，优先修改 `CAR_MOTOR_LEFT/RIGHT_POLARITY` 或
 `CAR_ENCODER_LEFT/RIGHT_POLARITY`，不要在控制算法各处散落负号。
+
+## 19. 主逻辑功能启用方式
+
+现有程序并不是只显示 OLED：`App_Car_Init()` 与 `App_Scheduler_Init()` 已经默认启用
+所有不造成上电误跑的后台链路，包括 IMU、八路 ADC、循迹位置解算、编码器、HC-05、
+OLED 和状态保护。编码器在 IDLE 也持续更新，循迹 ADC 在 IDLE 也持续采样；只有
+`LineControl → VehicleMixer → SpeedControl → Motor` 的闭环输出要求状态为 RUNNING。
+
+正常使用时通过 HC-05 单字符命令控制：
+
+```text
+C：进入八路传感器动态标定，电机禁止
+E：结束标定并保留 RAM 极值
+R：进入 RUNNING，启动完整循迹和速度闭环
+S：正常停止并拉低 STBY
+X：紧急停止并锁存 FAULT
+G：当前 IMU 偏航角清零
+I：开始 IMU 静止零偏标定
+```
+
+`empty.c` 顶部新增两个默认注释的上电选项：
+
+```c
+/* #define CAR_POWER_ON_START_CALIBRATION */
+/* #define CAR_POWER_ON_START_TRACKING    */
+```
+
+取消第一行注释会在初始化后自动进入传感器标定，电机仍然禁止；取消第二行会在初始化
+后自动执行 `App_Car_Start()`，立即释放 TB6612 STBY 并进入完整闭环。两项同时启用会
+由预处理器报错，避免含糊的上电状态。默认保持两行注释，满足“上电绝不自动运行”。
+
+不要把 `LineSensor_Sample()`、`Encoder_Update()`、`Motor_Update()` 或 OLED 刷新再次
+手工塞进 `while(1)`；这些调用已经由调度器按固定周期执行，重复调用会改变采样率、
+滤波和斜坡行为。
+
+本功能选择区已经用 TI ARM Clang 和正式 `device.opt` 分别验证：默认 IDLE、自动标定、
+自动循迹三个合法分支均编译通过；同时定义两项时按设计触发互斥 `#error`。同步正式
+工程后执行 `gmake -j4 all`，最终编译、链接和 HEX 生成退出码为 0。
