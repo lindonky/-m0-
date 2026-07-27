@@ -1,0 +1,25 @@
+# User-maintained additions included by the CCS generated Debug/makefile.
+#
+# CCS normally discovers a new .c file after Project Refresh and regenerates app/subdir_vars.mk.
+# The guard below also lets command-line gmake build pid_debug.c immediately, without editing any
+# generated file. Once CCS lists the object itself, filter finds it and prevents a duplicate link.
+ifeq ($(filter ./app/pid_debug.o,$(OBJS)),)
+OBJS += ./app/pid_debug.o
+# Put the new object before generated libraries. This preserves one-pass archive resolution for
+# vsnprintf/strlen until CCS regenerates ORDERED_OBJS with the source in its normal app position.
+ORDERED_OBJS := "./app/pid_debug.o" $(ORDERED_OBJS)
+
+# The generated `all: $(OBJS)` prerequisites were expanded before makefile.targets was included.
+# Add the object explicitly to both targets so a clean command-line build compiles it before link.
+all: ./app/pid_debug.o
+empty_LP_MSPM0G3507_nortos_ticlang.out: ./app/pid_debug.o
+endif
+
+# app/subdir_rules.mk already provides the generic app/%.o rule. Include this module's dependency
+# file explicitly until CCS has regenerated app/subdir_vars.mk to list the new source itself.
+-include app/pid_debug.d
+
+.PHONY: pid_debug_clean
+clean: pid_debug_clean
+pid_debug_clean:
+	-$(RM) "app\pid_debug.o" "app\pid_debug.d" "app\pid_debug.d_raw"

@@ -759,3 +759,426 @@ I：开始 IMU 静止零偏标定
 该宏在 `line_control.c` 中统一乘到正常循迹 PID 输出和丢线搜索输出。`-1.0f` 翻转当前
 转向，`+1.0f` 恢复原软件约定；不要用 `CAR_LINE_BLACK_IS_LOW_RAW`、电机极性或编码器
 极性代替它。宏乘在完整 PID 输出之后，因此 P/I/D 符号保持一致。
+
+## 21. 2026-07-26 IMU 偏航角速度内环
+
+### 21.1 为什么普通循迹不直接锁定绝对偏航角
+
+此前 IMU 已经在 1 ms 任务中接收、校验并发布 `yawDegrees` 和 `gyroZDps`，但控制链为：
+
+```text
+八路灰度位置
+  -> LineControl 灰度方向 PID
+  -> VehicleMixer 左右差速
+  -> 两轮速度 PID
+  -> Motor/TB6612
+```
+
+因此 IMU 当时只参与诊断，没有反馈到转向。不能简单增加“目标角度=0°”的全局角度
+PID：车辆进入弯道后，赛道方向本来就会改变，绝对角度环会试图把车拉回起跑方向，
+与灰度循迹正面冲突。
+
+本轮改为适合连续赛道的级联结构：
+
+```text
+八路灰度位置
+  -> 灰度方向 PID，得到 lineSteeringMmS（已验证的基础转向）
+  -> 按 CAR_YAW_RATE_TARGET_GAIN 换算 targetYawRateDps
+  -> IMU gyroZDps 角速度内环，得到有限的 correctionMmS
+  -> finalSteering = lineSteering + correction
+  -> VehicleMixer
+  -> 左右轮速度 PID
+  -> Motor/TB6612
+```
+
+累计 `yawDegrees` 仍然保留，并应在明确知道目标角度的状态中使用，例如：直角转弯、
+定角转向、环岛分段、短时丢线保持。届时可以再加“角度外环输出目标角速度”，复用
+本轮已经完成的角速度内环。
+
+### 21.2 修改的代码
+
+- `config/car_config.h`：新增角速度环开关、目标映射、目标限幅、PID、修正限幅和
+  100 ms 渐入时间；明确 `CAR_IMU_YAW_POLARITY` 必须调成实体右转时读数为正；
+- `control/line_control.c/.h`：在灰度方向 PID 后加入 IMU Z 轴角速度反馈；新增独立
+  PID 状态、状态复位、无效数据回退、最终共同限幅以及 `LineControl_Status`；
+- `app/app_car.c`：5 ms 控制任务把 `gyroZDps` 和“有效且未标定”状态传入方向环；
+- `app/app_debug.c`：OLED 增加第三个 IMU/角速度环页面；HC-05 CSV 末尾增加角速度
+  环是否激活、目标角速度、修正量和最终转向量。
+
+当前首版参数：
+
+```c
+#define CAR_YAW_RATE_CONTROL_ENABLE        (1U)
+#define CAR_YAW_RATE_TARGET_GAIN           (0.40f)
+#define CAR_YAW_RATE_TARGET_LIMIT_DPS      (120.0f)
+#define CAR_YAW_RATE_KP                    (0.50f)
+#define CAR_YAW_RATE_KI                    (0.0f)
+#define CAR_YAW_RATE_KD                    (0.0f)
+#define CAR_YAW_RATE_CORRECTION_LIMIT_MM_S (80.0f)
+#define CAR_YAW_RATE_ENGAGE_TIME_S         (0.10f)
+```
+
+这些是低速、保守的联调起点，不是实车最终参数。IMU 超时、CRC 导致数据超过 20 ms
+未更新或正在执行 `I` 静止零偏标定时，角速度 PID 会复位，修正归零，车辆自动退回
+此前已经正常工作的纯灰度循迹。最终转向仍受原来的 ±300 mm/s 限幅约束。
+
+### 21.3 OLED 第三页字段
+
+OLED 现在按“ADC/循迹 → 电机/编码器 → IMU/角速度环”轮换。第三页字段为：
+
+```text
+V       IMU 数据有效
+A       角速度闭环本周期实际激活
+CAL     正在执行静止零偏标定
+Y       累计偏航角 ×10
+G       实测 Z 轴角速度 ×10
+T10     目标偏航角速度 ×10
+C       IMU 产生的附加转向 mm/s
+LS      灰度方向环基础转向 mm/s
+OUT     最终转向 mm/s
+BIAS10  陀螺仪零偏 ×10
+EN      角速度修正渐入百分比
+FR/CRC  有效帧和 CRC 错误
+DROP/OVF 丢帧和 UART RX 溢出
+```
+
+HC-05 CSV 原 12 个字段保持顺序不变，并在末尾依次追加：
+
+```text
+yaw_rate_active,target_yaw_rate_x10,correction_mm_s,final_steering_mm_s
+```
+
+### 21.4 必须按顺序完成的上板验证
+
+1. 先让车停止，观察第三页 `V=1`、`FR` 连续增长、`CRC/DROP/OVF` 基本不增长；
+2. 车身保持完全静止，经 HC-05 发送 `I`，等待约 1 秒直至 `CAL` 从 1 回到 0；
+3. 架空车轮或断开电机主电源，手动把车身向右旋转，确认 `G` 为正；向左为负；
+4. 若方向相反，只把 `CAR_IMU_YAW_POLARITY` 从 `+1.0f` 改为 `-1.0f`；
+5. 放在线中央静止观察：`T10` 接近 0，短时转动车身时 `C` 应与 `G` 反号，表示
+   它在抵抗扰动；若同号则形成正反馈，禁止落地运行；
+6. 低速落地后确认 `A=1`、`EN` 最终到 100，且 `OUT` 等于 `LS+C` 限幅后的结果；
+7. 对比 `CAR_YAW_RATE_CONTROL_ENABLE=0/1` 的直线扰动和弯道表现，再开始调参。
+
+调参顺序固定为：先确认方向，再只调 `CAR_YAW_RATE_KP`，然后调
+`CAR_YAW_RATE_TARGET_GAIN`，最后才考虑极小的 `Ki`。首轮不要开 `Kd`，500 Hz 串口
+角速度已经是直接速度反馈，额外微分很容易放大量化噪声。
+
+### 21.5 当前证据等级和剩余工作
+
+工作副本中的 `line_control.c`、`app_car.c`、`app_debug.c` 已使用正式工程相同的 TI ARM
+Clang 5.1.1 LTS、`device.opt` 和 MSPM0 SDK 头文件独立编译，三个文件均零错误。此证据
+只到“目标编译通过”；正式工程同步、完整链接以及 IMU 物理方向/闭环效果仍需在下一步
+完成，不能把首版参数描述成已经实车整定。
+
+### 21.6 正式工程同步与完整构建结果
+
+2026-07-26 已将角速度闭环相关配置、方向控制、应用编排、OLED/HC-05 诊断和本交接
+记录同步至正式工程，并在正式 `Debug` 目录依次执行：
+
+```text
+gmake clean
+gmake -j4 all
+```
+
+结果为：SysConfig 重新生成成功、全部源文件编译成功、链接成功、Intel HEX 转换成功，
+两个命令退出码均为 0。最新主要产物：
+
+```text
+empty_LP_MSPM0G3507_nortos_ticlang.out  380672 bytes  2026-07-26 21:55:39
+empty_LP_MSPM0G3507_nortos_ticlang.hex   70404 bytes  2026-07-26 21:55:39
+empty_LP_MSPM0G3507_nortos_ticlang.map   71102 bytes  2026-07-26 21:55:39
+```
+
+生成文件再次确认：
+
+```text
+CPUCLK_FREQ             = 80000000
+IMU_UART_INST_FREQUENCY = 40000000
+```
+
+map 中存在正式链接的 `LineControl_Update`、`LineControl_GetStatus`、`IMU_GetData` 和
+`IMU_GetDiagnostics`；源码扫描未发现 `__WFI`、Sleep、STOP、STANDBY 或 SHUTDOWN
+调用。因此软件证据已达到“正式 SysConfig 生成、目标编译、完整链接、HEX 生成通过”。
+仍待完成的是 21.4 所列的 IMU 实物通信、右转正方向、负反馈符号和首版参数实车整定。
+
+## 22. 2026-07-26 HC-05 江协小程序 PID 在线调参
+
+### 22.1 参考协议与移植原则
+
+参考工程：
+
+```text
+C:\Epan\蓝牙模块教程资料\程序源码\
+9-4 串口收发文本数据包-已修改为蓝牙串口功能
+```
+
+确认其线上格式为：
+
+```text
+[display,x,y,text]
+[plot,y1,y2]
+[key,name,action]
+[slider,name,value]
+```
+
+参考 STM32 程序在 USART ISR 中拼接全局包并逐字节等待 TXE，且接收数组没有长度
+保护。本工程只保留兼容的文本格式，不移植阻塞行为：HC-05 ISR 仍只搬运 FIFO 到
+环形队列；`[`/`]` 状态机、字段拆分、十进制转换、PID 修改和格式化全部在 NoRTOS
+主循环执行；发送使用 `BSP_UART_TryWrite()` 完整入队，空间不足立即失败。
+
+### 22.2 新增文件和构建接入
+
+新增：
+
+```text
+app/pid_debug.c
+app/pid_debug.h
+makefile.targets
+```
+
+`pid_debug.c/.h` 是独立编译单元，负责文本协议、PID 选择/修改、display、plot 和诊断
+计数。根目录 `makefile.targets` 是 CCS 生成 Makefile 已预留的用户扩展入口：在 CCS
+尚未 Refresh 并把新源文件写入 `app/subdir_vars.mk` 之前，将 `app/pid_debug.o` 安全
+加入构建；若 CCS 已经自动发现该对象，`filter` 守卫会避免重复链接。没有手工修改
+`Debug` 目录下任何自动生成文件。
+
+同时修改：
+
+- `config/car_config.h`：增加 PID 调试、CSV、plot 周期、包超时和增益上限宏；
+- `app/app_debug.c/.h`：初始化新模块；把每个 RX 字节先交给括号协议；低频调用
+  `PIDDebug_Task()`；保留原单字符命令；
+- 默认关闭裸 CSV，避免无方括号 CSV 干扰手机小程序；需要电脑记录时可重新打开。
+
+### 22.3 发送 API
+
+没有全局覆盖 libc 的 `printf`，而是提供同样使用方式的非阻塞接口：
+
+```c
+PIDDebug_Printf("[display,0,0,Hello World]");
+PIDDebug_Printf("[plot,%f,%f]", y1, y2);
+
+PIDDebug_DisplayText(0, 0, "Hello World");
+PIDDebug_Plot2(y1, y2);
+```
+
+原因是标准 `printf` 的逐字符重定向无法保证文本包原子性：TX 中途满时可能只发出
+`[plot,1.2`，手机会永久等待 `]`。`PIDDebug_Printf()` 先在 192 字节有界缓冲区中用
+`vsnprintf` 完整格式化，再一次性尝试入队；格式化截断或 TX 空间不足时整包拒绝。
+它允许 `%f`，但只能用于 20/40 ms 低频调试任务，禁止 ISR 和 5 ms 控制任务调用。
+
+### 22.4 key 和 slider 映射
+
+按键动作兼容 `up`、`down`、`click`、`press`；滑条标签同时兼容参考例程的
+`slider` 和用户常用的 `slide` 拼写。
+
+```text
+[key,1,up] 或 [key,line,down]   选择灰度方向 PID
+[key,2,up] 或 [key,yaw,down]    选择 IMU 角速度 PID
+[key,3,up] 或 [key,left,down]   选择左轮速度 PID
+[key,4,up] 或 [key,right,down]  选择右轮速度 PID
+[key,5,down] / [key,status,...] 主动刷新参数 display
+[key,6,down] / [key,plot,...]   开关周期 plot
+[key,7,down] / [key,reset,...]  清所选 PID 的积分/微分历史，不改增益
+
+[slider,1,260.0] / [slide,kp,260.0] 修改所选 PID Kp
+[slider,2,0.0]   / [slide,ki,0.0]   修改所选 PID Ki
+[slider,3,6.0]   / [slide,kd,6.0]   修改所选 PID Kd
+```
+
+滑条值只接受普通十进制 `[-]123.456` 语法；实际增益限制为 0 到
+`CAR_PID_DEBUG_GAIN_MAX`，拒绝负数、NaN、Inf、指数、非法尾随字符和超范围值。
+调参只修改 RAM 中的 `PID_Controller`，掉电后恢复 `car_config.h` 编译默认值，没有
+写 Flash，也不会触发 80 MHz 下的 Flash 操作注意事项。
+
+### 22.5 与原单字符命令不冲突
+
+`App_Debug_PollCommands()` 的顺序是：
+
+```text
+HC-05 RX byte
+  -> PIDDebug_PushRxByte()
+       -> 位于 [ ... ] 内：完整消费，绝不再解释字母
+       -> 位于包外：返回 false
+  -> 旧 R/S/X/C/E/G/I switch
+```
+
+因此 `[slider,1,260]` 中出现的 `r`、`i` 等字符不会触发 RUN 或 IMU 标定。只有手机
+直接在方括号之外发送单字节 `R` 才会起跑。未闭合包 250 ms 超时自动退出；超长包
+持续丢弃到 `]`，其尾部也不会泄漏到旧命令解析器。
+
+### 22.6 默认显示与曲线
+
+默认选择 LINE PID，每 1 秒重发三条 display，使手机晚于 MCU 上电连接也能看到：
+
+```text
+PID 名称
+Kp / Ki
+Kd / Plot开关
+```
+
+plot 默认每 40 ms（25 Hz）发送两条曲线：
+
+| 所选 PID | y1 | y2 |
+|---|---|---|
+| LINE | 目标位置 0 | 灰度实际 position |
+| YAW | 目标角速度 deg/s | IMU 实测角速度 deg/s |
+| SPEED-L | 左轮目标 mm/s | 左轮实测 mm/s |
+| SPEED-R | 右轮目标 mm/s | 右轮实测 mm/s |
+
+配置宏：
+
+```c
+#define CAR_PID_DEBUG_ENABLE               (1U)
+#define CAR_DEBUG_CSV_ENABLE               (0U)
+#define CAR_PID_DEBUG_PLOT_DEFAULT         (1U)
+#define CAR_PID_DEBUG_PLOT_PERIOD_MS       (40U)
+#define CAR_PID_DEBUG_DISPLAY_PERIOD_MS    (1000U)
+#define CAR_PID_DEBUG_PACKET_TIMEOUT_MS    (250U)
+#define CAR_PID_DEBUG_GAIN_MAX             (10000.0f)
+```
+
+### 22.7 诊断和调参安全
+
+`PIDDebug_GetDiagnostics()` 提供：正确闭合包、key、slider、格式错误、包溢出、包超时、
+未知命令、拒绝值、TX 拒绝、格式化截断、当前 PID 和 plot 开关计数/状态。
+
+在线调参必须架空或低速开始。建议顺序：
+
+1. 选择某个 PID；
+2. 先保持 Ki=0、Kd=0，只调 Kp；
+3. 观察 plot 中目标与实测；
+4. 再逐步增加 Ki 消除稳态误差；
+5. 最后才增加少量 Kd；
+6. 参数异常时发 `[key,7,down]` 只清历史，或停车后重新下载恢复编译默认值。
+
+模块不会自动把 key 映射到起跑/停车，防止调参界面误触。车辆状态仍由明确的包外
+`R/S/X/C/E/G/I` 管理。
+
+### 22.8 正式工程 Clean Build 验证
+
+2026-07-26 已把本节所列代码同步到正式工程，并在正式工程 `Debug` 目录依次执行：
+
+```text
+gmake clean
+gmake -j4 all
+```
+
+第一次从干净状态构建时发现一个 CCS 用户扩展入口的依赖展开细节：虽然
+`makefile.targets` 已把 `./app/pid_debug.o` 加入链接对象列表，但自动生成 Makefile 中
+较早定义的 `all: $(OBJS)` 已经完成变量展开，导致链接阶段能够看到对象名，构建阶段
+却没有先生成该对象。没有修改 `Debug/makefile`、`Debug/app/subdir_vars.mk` 或
+`Debug/app/subdir_rules.mk` 等自动生成文件，而是在用户维护的 `makefile.targets` 中为
+`all` 和最终 `.out` 目标显式补充 `./app/pid_debug.o` 依赖，并保留 `filter` 守卫避免
+CCS Refresh 后重复加入对象。
+
+修正后再次从干净状态完整构建，日志明确证明：
+
+```text
+Clean 删除 app\pid_debug.o、app\pid_debug.d、app\pid_debug.d_raw
+Build 重新执行 Arm Compiler - building file: "../app/pid_debug.c"
+最终链接命令包含 "./app/pid_debug.o"
+SysConfig 生成成功
+全部源文件编译成功
+链接成功
+Intel HEX 生成成功
+clean 和 build 退出码均为 0
+```
+
+最终主要产物为：
+
+```text
+empty_LP_MSPM0G3507_nortos_ticlang.out  402660 bytes  2026-07-26 22:39:38
+empty_LP_MSPM0G3507_nortos_ticlang.hex   79535 bytes  2026-07-26 22:39:38
+empty_LP_MSPM0G3507_nortos_ticlang.map   76234 bytes  2026-07-26 22:39:38
+app/pid_debug.o                           37836 bytes  2026-07-26 22:39:37
+```
+
+map 文件已确认存在 `PIDDebug_PushRxByte`、`PIDDebug_Task`、`PIDDebug_Init`、
+`PIDDebug_Printf`、`PIDDebug_CheckTimeout` 和浮点格式化所需的 `vsnprintf`。部分短小公开
+函数可能被 TI ARM Clang 内联，因此不要求每个包装函数都保留为独立链接符号。
+
+源代码低功耗扫描未发现 `__WFI`、`enterSleep`、`enterSTOP`、`enterSTANDBY` 或
+`enterSHUTDOWN` 调用。本次在线调参模块没有加入休眠、低功耗等待或阻塞式毫秒延时；
+UART ISR 仍然只搬运字节，文本解析、浮点格式化、PID 参数修改和协议发送都在主循环
+低频任务完成。
+
+## 23. 2026-07-27 构建故障修复与运行链路复核
+
+### 23.1 表面现象与真实首错
+
+CCS 并行构建日志末尾显示 `oled_data.c`、`tb6612.c`、`oled.c` 均为
+`Finished building`，随后只出现：
+
+```text
+gmake: Target 'all' not remade because of errors.
+```
+
+这些驱动不是故障源。使用 `gmake -j1 all` 重新构建后，完整首错为
+`pid_debug.c` 找不到 `CAR_PID_DEBUG_GAIN_MAX`、plot/display 周期等宏。
+
+### 23.2 根因和保留的实车参数
+
+正式工程 `config/car_config.h` 当时被替换成了只有 107 行的较早版本，除 HC-05
+调试宏外，还同时丢失：
+
+```text
+CAR_LINE_STEERING_POLARITY
+CAR_YAW_RATE_CONTROL_ENABLE 及完整角速度环配置
+CAR_PID_DEBUG_ENABLE 及完整方括号协议配置
+```
+
+修复没有直接用旧工作副本覆盖正式文件，而是做了合并，并保留正式文件中已经修改的
+左右轮速度 PID：
+
+```c
+#define CAR_SPEED_LEFT_KP   (2.0f)
+#define CAR_SPEED_LEFT_KI   (0.0f)
+#define CAR_SPEED_LEFT_KD   (0.02f)
+#define CAR_SPEED_RIGHT_KP  (2.0f)
+#define CAR_SPEED_RIGHT_KI  (0.0f)
+#define CAR_SPEED_RIGHT_KD  (0.02f)
+```
+
+### 23.3 同时发现的运行级问题
+
+第一次修复配置后固件已经能够编译，但 map 只保留 `PIDDebug_Init`，没有
+`PIDDebug_Task`、`App_Debug_PollCommands` 或 `App_Scheduler_Run`。进一步核对发现正式
+`empty.c` 中主循环调用被注释成：
+
+```c
+// App_Scheduler_Run();
+```
+
+这种状态能够通过编译和链接，却会让程序在空 `while (1)` 中循环，导致 ADC、IMU、
+5 ms 控制环、HC-05 RX/plot 和 OLED 周期刷新全部停止。现已恢复
+`App_Scheduler_Run()`；用户主动启用的裸 `App_Car_Start()` 保持不变。
+
+### 23.4 最终 Clean Build 证据
+
+恢复调度器后再次执行完整 `gmake clean` 和 `gmake -j4 all`。SysConfig、全部源文件、
+链接和 HEX 生成均成功，退出码为 0。最终产物：
+
+```text
+empty_LP_MSPM0G3507_nortos_ticlang.out  402660 bytes  2026-07-27 11:44:43
+empty_LP_MSPM0G3507_nortos_ticlang.hex   79535 bytes  2026-07-27 11:44:43
+empty_LP_MSPM0G3507_nortos_ticlang.map   76234 bytes  2026-07-27 11:44:43
+app/pid_debug.o                           37836 bytes  2026-07-27 11:44:39
+```
+
+map 已确认最终运行链路包含：
+
+```text
+App_Scheduler_Run
+App_Debug_PollCommands
+App_Debug_Task
+PIDDebug_Init
+PIDDebug_PushRxByte
+PIDDebug_CheckTimeout
+PIDDebug_Printf
+PIDDebug_Task
+LineControl_Update
+```
+
+正式工程与工作副本的 `config/car_config.h`、`empty.c` SHA-256 均一致。若 CCS 编辑器
+仍打开修复前的旧文件并提示“磁盘内容已被外部修改”，必须选择从磁盘重新加载；不要
+保留旧编辑器内容后再保存，否则会再次覆盖这些配置和调度器调用。

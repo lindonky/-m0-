@@ -571,3 +571,63 @@ CPUCLK_FREQ / 800000UL
 
 自动换算；在 80 MHz 下为 100 cycles，与原 32 MHz/40 cycles 等比例。这个值只能
 作为起点，仍应通过实物显示和示波器 SCL 波形复测。
+
+## 14. IMU 角速度反馈接入（2026-07-26）
+
+普通循迹采用“灰度位置外环 + IMU 偏航角速度内环 + 双轮速度环”，不在整条赛道上
+固定一个绝对偏航角。5 ms 控制任务调用关系为：
+
+```text
+LineControl_Update(line,
+                   imu->gyroZDps,
+                   imu->valid && !imuDiagnostics->calibrating,
+                   0.005 s)
+```
+
+`LineControl` 先保留灰度 PID 的基础转向，再用目标角速度和实测角速度之差生成最多
+±80 mm/s 的附加修正。IMU 无效或标定中会清除角速度 PID 并退回纯灰度循迹；不会
+等待串口、不会停在循环里，也不会进入任何低功耗状态。
+
+方向定义必须统一为：
+
+```text
+最终 steeringMmS > 0  -> 右转（左轮快、右轮慢）
+IMU gyroZDps > 0       -> 车身实体向右旋转
+```
+
+若第二条不成立，只修改 `CAR_IMU_YAW_POLARITY`。不要修改已经实车确认的
+`CAR_LINE_STEERING_POLARITY`、电机极性或编码器极性来补偿 IMU 安装方向。
+
+上板第一轮必须架空或断开电机主电源，通过 OLED 第三页检查 `V/A/G/T10/C/LS/OUT`。
+当目标角速度 `T10=0` 时，手动向右转动车身产生正 `G`，修正 `C` 应为负；这才是
+负反馈。若 `C` 与 `G` 同号，说明方向错误，不允许让车辆落地闭环运行。
+
+## 15. HC-05 蓝牙小程序 PID 在线调试
+
+`app/pid_debug.c/.h` 已移植江协小程序的方括号文本协议，但不使用参考程序的阻塞
+USART 发送或 ISR 拼包。推荐发送接口：
+
+```c
+PIDDebug_Printf("[display,0,0,Hello World]");
+PIDDebug_Printf("[plot,%f,%f]", y1, y2);
+PIDDebug_DisplayText(0, 0, "Hello World");
+PIDDebug_Plot2(y1, y2);
+```
+
+RX 使用：
+
+```text
+key 1/2/3/4：选择 LINE/YAW/SPEED-L/SPEED-R PID
+key 5：刷新 display
+key 6：开关 plot
+key 7：清所选 PID 历史状态
+slider 1/2/3：修改所选 PID Kp/Ki/Kd
+```
+
+`slide` 与 `slider` 都接受；控件名也可使用 `line/yaw/left/right` 和 `kp/ki/kd`。
+括号包内字符不会进入旧 `R/S/X/C/E/G/I` switch，未闭合包会在 250 ms 后退出，
+超长包丢弃到 `]`。所有调参只改 RAM，不写 Flash。
+
+默认 `CAR_DEBUG_CSV_ENABLE=0`，避免裸 CSV 混入手机小程序；需要电脑原始记录时可设
+为 1。plot 默认 25 Hz，LINE 画目标位置/实际位置，YAW 画目标/实测角速度，两轮速度
+环分别画目标/实测 mm/s。浮点格式化只能在低频调试任务使用，禁止 ISR 和控制任务。

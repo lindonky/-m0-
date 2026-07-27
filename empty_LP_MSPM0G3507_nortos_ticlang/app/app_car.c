@@ -2,7 +2,7 @@
  * 整车应用编排。
  *
  * 此文件只组合已有模块，不包含 GPIO/ADC 寄存器细节。运行状态下的数据通路是：
- * LineSensor → LineControl → VehicleMixer → SpeedControl → Motor → TB6612。
+ * LineSensor + IMU → LineControl → VehicleMixer → SpeedControl → Motor → TB6612。
  */
 #include "app/app_car.h"
 
@@ -52,6 +52,8 @@ void App_Car_ControlTask5ms(void)
 {
     const Encoder_Data *left;
     const Encoder_Data *right;
+    const IMU_Data *imu;
+    const IMU_Diagnostics *imuDiagnostics;
     LineControl_Output lineOutput;
     WheelSpeed_Targets targets;
 
@@ -59,10 +61,18 @@ void App_Car_ControlTask5ms(void)
     Encoder_Update(CAR_CONTROL_PERIOD_S);
     left = Encoder_GetLeft();
     right = Encoder_GetRight();
+    imu = IMU_GetData();
+    imuDiagnostics = IMU_GetDiagnostics();
 
     if (g_state == CAR_STATE_RUNNING) {
-        /* 方向环给出前进/转向速度，再混合为左右轮目标。 */
+        /*
+         * 灰度方向环先给基础转向，IMU 有效且未在静止标定时再由角速度内环修正；
+         * 随后才混合为左右轮目标。IMU 超时会在 LineControl 内自动回退灰度控制。
+         */
         lineOutput = LineControl_Update(LineSensor_GetData(),
+                                        imu->gyroZDps,
+                                        imu->valid &&
+                                            !imuDiagnostics->calibrating,
                                         CAR_CONTROL_PERIOD_S);
         targets = VehicleMixer_Mix(lineOutput.forwardMmS,
                                    lineOutput.steeringMmS,

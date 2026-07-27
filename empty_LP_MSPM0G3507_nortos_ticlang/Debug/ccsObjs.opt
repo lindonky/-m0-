@@ -4,6 +4,7 @@
 "./app/app_car.o"
 "./app/app_debug.o"
 "./app/app_scheduler.o"
+"./app/pid_debug.o"
 "./bsp/bsp_board.o"
 "./bsp/bsp_encoder.o"
 "./bsp/bsp_i2c.o"

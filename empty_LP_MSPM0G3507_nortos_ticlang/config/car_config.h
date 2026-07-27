@@ -80,13 +80,44 @@
 #define CAR_LINE_KD                        (6.0f)
 #define CAR_LINE_STEERING_LIMIT_MM_S       (300.0f)
 
+/*
+ * IMU 转向角速度内环。
+ *
+ * 普通循迹不能永久锁定一个“世界坐标绝对角度”，否则进入弯道后角度环会强迫车辆
+ * 回到起跑方向，与灰度循迹互相打架。因此这里使用级联结构：
+ *
+ *   灰度位置环输出基础转向速度差
+ *       -> 按比例换算为目标偏航角速度
+ *       -> IMU Z 轴角速度 P/PI 环生成附加转向修正
+ *       -> 与基础转向叠加后送入左右轮差速混合
+ *
+ * 这既保留了当前已经实车验证的灰度循迹，又能用陀螺仪抑制甩尾、外力扰动和
+ * 左右轮动态差异。累计 yawDegrees 留给直角、环岛、定角转向和短时丢线保持等
+ * 明确知道目标角度的状态使用，不在普通连续循迹中强行锁定。
+ *
+ * 重要方向约定：经过 CAR_IMU_YAW_POLARITY 处理后，车辆实际向右转时
+ * IMU gyroZDps 必须为正。若架空车轮手动向右旋转车身时读数为负，只修改
+ * CAR_IMU_YAW_POLARITY，不要修改电机、编码器或循迹传感器极性。
+ */
+#define CAR_YAW_RATE_CONTROL_ENABLE        (1U)
+/* 基础转向 1 mm/s 对应多少 deg/s 目标角速度；首版只作低速保守起点。 */
+#define CAR_YAW_RATE_TARGET_GAIN           (0.40f)
+#define CAR_YAW_RATE_TARGET_LIMIT_DPS      (120.0f)
+/* PID 输出单位为附加转向速度差 mm/s；Ki 首版为 0，先调稳 Kp 再考虑积分。 */
+#define CAR_YAW_RATE_KP                    (0.50f)
+#define CAR_YAW_RATE_KI                    (0.0f)
+#define CAR_YAW_RATE_KD                    (0.0f)
+#define CAR_YAW_RATE_CORRECTION_LIMIT_MM_S (80.0f)
+/* IMU 从无效变为有效后，用该时间把修正从 0 平滑增加到 100%。 */
+#define CAR_YAW_RATE_ENGAGE_TIME_S         (0.10f)
+
 /* 左右轮速度闭环参数，建议先架空车轮分别整定。 */
-#define CAR_SPEED_LEFT_KP                  (1.0f)
+#define CAR_SPEED_LEFT_KP                  (2.0f)
 #define CAR_SPEED_LEFT_KI                  (0.0f)
-#define CAR_SPEED_LEFT_KD                  (0.0f)
-#define CAR_SPEED_RIGHT_KP                 (1.0f)
+#define CAR_SPEED_LEFT_KD                  (0.02f)
+#define CAR_SPEED_RIGHT_KP                 (2.0f)
 #define CAR_SPEED_RIGHT_KI                 (0.0f)
-#define CAR_SPEED_RIGHT_KD                 (0.0f)
+#define CAR_SPEED_RIGHT_KD                 (0.02f)
 
 /*
  * 串口 IMU 参数。
@@ -95,11 +126,27 @@
  */
 #define CAR_IMU_REPORT_RATE_HZ             (500U)
 #define CAR_IMU_RAW_TO_DEG                 (0.1f)
+/* 必须调成“车身实际右转时 yawDegrees 和 gyroZDps 都增加”。 */
 #define CAR_IMU_YAW_POLARITY               (+1.0f)
 #define CAR_IMU_DATA_TIMEOUT_MS            (20U)
 #define CAR_IMU_STARTUP_CONFIG_DELAY_MS    (3000U)
 #define CAR_IMU_CALIBRATION_SAMPLES        (500U)
 #define CAR_IMU_MAX_BYTES_PER_UPDATE       (32U)
+
+/*
+ * HC-05 调试协议。
+ *
+ * PID_DEBUG 使用江协蓝牙小程序的 `[display]`、`[plot]`、`[key]` 和 `[slider]`
+ * 文本包。旧 CSV 默认关闭，避免无方括号的 CSV 数据污染小程序界面；需要电脑记录
+ * 原始 CSV 时可重新打开，也可以同时开启两种发送格式。
+ */
+#define CAR_PID_DEBUG_ENABLE               (1U)
+#define CAR_DEBUG_CSV_ENABLE               (0U)
+#define CAR_PID_DEBUG_PLOT_DEFAULT         (1U)
+#define CAR_PID_DEBUG_PLOT_PERIOD_MS       (40U)
+#define CAR_PID_DEBUG_DISPLAY_PERIOD_MS    (1000U)
+#define CAR_PID_DEBUG_PACKET_TIMEOUT_MS    (250U)
+#define CAR_PID_DEBUG_GAIN_MAX             (10000.0f)
 
 /* 人机和遥测任务低频运行，避免占用 200 Hz 控制环时间。 */
 #define CAR_DEBUG_PERIOD_MS                (20U)

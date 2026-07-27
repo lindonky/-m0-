@@ -16,6 +16,7 @@ ORDERED_OBJS += \
 "./app/app_car.o" \
 "./app/app_debug.o" \
 "./app/app_scheduler.o" \
+"./app/pid_debug.o" \
 "./bsp/bsp_board.o" \
 "./bsp/bsp_encoder.o" \
 "./bsp/bsp_i2c.o" \
@@ -179,8 +180,8 @@ empty_LP_MSPM0G3507_nortos_ticlang.hex: $(EXE_OUTPUTS)
 # Other Targets
 clean:
 	-$(RM) $(GEN_MISC_FILES__QUOTED)$(BIN_OUTPUTS__QUOTED)$(GEN_FILES__QUOTED)$(EXE_OUTPUTS__QUOTED)
-	-$(RM) "empty.o" "ti_msp_dl_config.o" "startup_mspm0g350x_ticlang.o" "app\app_car.o" "app\app_debug.o" "app\app_scheduler.o" "bsp\bsp_board.o" "bsp\bsp_encoder.o" "bsp\bsp_i2c.o" "bsp\bsp_imu_uart.o" "bsp\bsp_line_adc.o" "bsp\bsp_oled_soft_i2c.o" "bsp\bsp_tb6612.o" "bsp\bsp_time.o" "bsp\bsp_uart.o" "control\line_control.o" "control\pid.o" "control\speed_control.o" "control\vehicle_mixer.o" "drivers\encoder.o" "drivers\imu.o" "drivers\line_sensor.o" "drivers\motor.o" "drivers\oled.o" "drivers\oled_data.o" "drivers\tb6612.o" 
-	-$(RM) "empty.d" "ti_msp_dl_config.d" "startup_mspm0g350x_ticlang.d" "app\app_car.d" "app\app_debug.d" "app\app_scheduler.d" "bsp\bsp_board.d" "bsp\bsp_encoder.d" "bsp\bsp_i2c.d" "bsp\bsp_imu_uart.d" "bsp\bsp_line_adc.d" "bsp\bsp_oled_soft_i2c.d" "bsp\bsp_tb6612.d" "bsp\bsp_time.d" "bsp\bsp_uart.d" "control\line_control.d" "control\pid.d" "control\speed_control.d" "control\vehicle_mixer.d" "drivers\encoder.d" "drivers\imu.d" "drivers\line_sensor.d" "drivers\motor.d" "drivers\oled.d" "drivers\oled_data.d" "drivers\tb6612.d" 
+	-$(RM) "empty.o" "ti_msp_dl_config.o" "startup_mspm0g350x_ticlang.o" "app\app_car.o" "app\app_debug.o" "app\app_scheduler.o" "app\pid_debug.o" "bsp\bsp_board.o" "bsp\bsp_encoder.o" "bsp\bsp_i2c.o" "bsp\bsp_imu_uart.o" "bsp\bsp_line_adc.o" "bsp\bsp_oled_soft_i2c.o" "bsp\bsp_tb6612.o" "bsp\bsp_time.o" "bsp\bsp_uart.o" "control\line_control.o" "control\pid.o" "control\speed_control.o" "control\vehicle_mixer.o" "drivers\encoder.o" "drivers\imu.o" "drivers\line_sensor.o" "drivers\motor.o" "drivers\oled.o" "drivers\oled_data.o" "drivers\tb6612.o" 
+	-$(RM) "empty.d" "ti_msp_dl_config.d" "startup_mspm0g350x_ticlang.d" "app\app_car.d" "app\app_debug.d" "app\app_scheduler.d" "app\pid_debug.d" "bsp\bsp_board.d" "bsp\bsp_encoder.d" "bsp\bsp_i2c.d" "bsp\bsp_imu_uart.d" "bsp\bsp_line_adc.d" "bsp\bsp_oled_soft_i2c.d" "bsp\bsp_tb6612.d" "bsp\bsp_time.d" "bsp\bsp_uart.d" "control\line_control.d" "control\pid.d" "control\speed_control.d" "control\vehicle_mixer.d" "drivers\encoder.d" "drivers\imu.d" "drivers\line_sensor.d" "drivers\motor.d" "drivers\oled.d" "drivers\oled_data.d" "drivers\tb6612.d" 
 	-@echo ' '
 
 secondary-outputs: $(BIN_OUTPUTS)

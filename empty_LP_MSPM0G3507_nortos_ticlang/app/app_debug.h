@@ -3,9 +3,11 @@
 
 /**
  * @file app_debug.h
- * @brief UART 单字符命令、低频 CSV 遥测和 OLED 诊断显示应用层。
+ * @brief UART 单字符命令、PID 文本调试协议、可选 CSV 和 OLED 诊断显示应用层。
  *
  * 新增 IMU 命令：G=当前偏航角清零，I=开始静止角速度零偏标定。
+ * 方括号 `[key/slider,...]` 数据包由 pid_debug.c 单独解析；包内字符不会再被解释为
+ * R/S/X/C/E/G/I，因此两套协议可以共用同一个 HC-05 RX 队列。
  */
 
 void App_Debug_Init(void);
