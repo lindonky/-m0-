@@ -15,6 +15,8 @@
 #include "bsp/bsp_time.h"
 #include "bsp/bsp_uart.h"
 #include "config/board_config.h"
+#include "config/car_config.h"
+#include "control/angle_control.h"
 #include "control/line_control.h"
 #include "control/speed_control.h"
 #include "drivers/encoder.h"
@@ -100,6 +102,38 @@ static void render_oled_imu_diagnostics(void)
 {
     const IMU_Data *imu = IMU_GetData();
     const IMU_Diagnostics *imuDiag = IMU_GetDiagnostics();
+#if CAR_CONTROL_MODE == CAR_CONTROL_MODE_ANGLE_DEBUG
+    const AngleControl_Status *angle = AngleControl_GetStatus();
+    const PID_Controller *anglePid = AngleControl_GetPID();
+    const PIDDebug_Diagnostics *debug = PIDDebug_GetDiagnostics();
+
+    OLED_Clear();
+    OLED_Printf(0, 0, OLED_6X8, "ANGLE S:%u V:%u SET:%u",
+                (unsigned int) App_Car_GetState(),
+                imu->valid ? 1U : 0U,
+                angle->settled ? 1U : 0U);
+    OLED_Printf(0, 8, OLED_6X8, "T10:%7ld Y10:%7ld",
+                (long) (angle->targetDegrees * 10.0f),
+                (long) (angle->measuredDegrees * 10.0f));
+    OLED_Printf(0, 16, OLED_6X8, "E10:%7ld G10:%7ld",
+                (long) (angle->errorDegrees * 10.0f),
+                (long) (angle->gyroZDps * 10.0f));
+    OLED_Printf(0, 24, OLED_6X8, "OUT:%6ld CNT:%4u",
+                (long) angle->steeringMmS,
+                (unsigned int) angle->settledCycles);
+    OLED_Printf(0, 32, OLED_6X8, "KP100:%6ld KI:%6ld",
+                (long) (anglePid->kp * 100.0f),
+                (long) (anglePid->ki * 100.0f));
+    OLED_Printf(0, 40, OLED_6X8, "KD100:%6ld TXR:%5lu",
+                (long) (anglePid->kd * 100.0f),
+                (unsigned long) BSP_UART_GetTxRejectedCount());
+    OLED_Printf(0, 48, OLED_6X8, "FR:%7lu CRC:%5lu",
+                (unsigned long) imuDiag->validFrames,
+                (unsigned long) imuDiag->crcErrors);
+    OLED_Printf(0, 56, OLED_6X8, "PKT:%4lu UERR:%4lu",
+                (unsigned long) debug->receivedPackets,
+                (unsigned long) BSP_UART_GetHardwareErrorCount());
+#else
     const LineControl_Status *lineControl = LineControl_GetStatus();
 
     OLED_Clear();
@@ -128,6 +162,7 @@ static void render_oled_imu_diagnostics(void)
     OLED_Printf(0, 56, OLED_6X8, "DROP:%5lu OVF:%5lu",
                 (unsigned long) imuDiag->droppedFrames,
                 (unsigned long) imuDiag->uartRxOverflows);
+#endif
 }
 
 /** @brief 只在完整 8 页边界切换画面，避免同一轮刷新混入两套页面内容。 */
@@ -154,7 +189,12 @@ void App_Debug_Init(void)
      * IDLE 且 TB6612 未使能，故一次完整清屏不会影响运动控制时序。
      */
     g_oledNextPage = 0U;
+#if CAR_CONTROL_MODE == CAR_CONTROL_MODE_ANGLE_DEBUG
+    /* 角度调试默认直接显示 IMU/ANGLE 页，不必等待自动轮换。 */
+    g_oledView = 2U;
+#else
     g_oledView = 0U;
+#endif
     OLED_Init();
     g_oledConnected = OLED_IsConnected();
 #endif
@@ -260,9 +300,17 @@ void App_Debug_OLEDTask(void)
     OLED_UpdateArea(0, (int16_t) page * 8, 128U, 8U);
     g_oledConnected = OLED_IsConnected();
     g_oledNextPage = (uint8_t) ((page + 1U) % APP_OLED_PAGE_COUNT);
-    /* 三个诊断画面依次轮换：ADC/循迹 → 电机/编码器 → IMU/角速度环。 */
-    if (g_oledNextPage == 0U) {
-        g_oledView = (uint8_t) ((g_oledView + 1U) % 3U);
-    }
+#endif
+}
+
+uint8_t App_Debug_NextOLEDView(void)
+{
+#if CAR_OLED_SOFT_I2C_READY
+    /* 页面只由明确的蓝牙 key 命令切换，不再每 8 行自动跳页。 */
+    g_oledView = (uint8_t) ((g_oledView + 1U) % 3U);
+    g_oledNextPage = 0U;
+    return g_oledView;
+#else
+    return 0U;
 #endif
 }

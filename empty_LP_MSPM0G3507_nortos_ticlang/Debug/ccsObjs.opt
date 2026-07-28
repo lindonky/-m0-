@@ -14,6 +14,7 @@
 "./bsp/bsp_tb6612.o"
 "./bsp/bsp_time.o"
 "./bsp/bsp_uart.o"
+"./control/angle_control.o"
 "./control/line_control.o"
 "./control/pid.o"
 "./control/speed_control.o"

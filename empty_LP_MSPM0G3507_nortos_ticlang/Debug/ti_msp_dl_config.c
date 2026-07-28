@@ -482,11 +482,11 @@ SYSCONFIG_WEAK void SYSCFG_DL_HC05_UART_init(void)
     DL_UART_Main_init(HC05_UART_INST, (DL_UART_Main_Config *) &gHC05_UARTConfig);
     /*
      * Configure baud rate by setting oversampling and baud rate divisors.
-     *  Target baud rate: 115200
-     *  Actual baud rate: 115190.78
+     *  Target baud rate: 9600
+     *  Actual baud rate: 9599.81
      */
     DL_UART_Main_setOversampling(HC05_UART_INST, DL_UART_OVERSAMPLING_RATE_16X);
-    DL_UART_Main_setBaudRateDivisor(HC05_UART_INST, HC05_UART_IBRD_40_MHZ_115200_BAUD, HC05_UART_FBRD_40_MHZ_115200_BAUD);
+    DL_UART_Main_setBaudRateDivisor(HC05_UART_INST, HC05_UART_IBRD_40_MHZ_9600_BAUD, HC05_UART_FBRD_40_MHZ_9600_BAUD);
 
 
     /* Configure Interrupts */

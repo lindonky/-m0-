@@ -631,3 +631,142 @@ slider 1/2/3：修改所选 PID Kp/Ki/Kd
 默认 `CAR_DEBUG_CSV_ENABLE=0`，避免裸 CSV 混入手机小程序；需要电脑原始记录时可设
 为 1。plot 默认 25 Hz，LINE 画目标位置/实际位置，YAW 画目标/实测角速度，两轮速度
 环分别画目标/实测 mm/s。浮点格式化只能在低频调试任务使用，禁止 ISR 和控制任务。
+
+## 16. 当前 HC-05 定角调试配置（2026-07-27）
+
+> 本节是第 15 节功能的最终扩展和当前上板配置。第 15 节中的“默认 LINE、25 Hz
+> plot、key 5 刷新”已经被当前实现替代；调试时应以本节为准。
+
+### 16.1 当前模式与 UART
+
+当前不是循迹运行模式，而是原地相对角度闭环调试模式：
+
+```c
+#define CAR_CONTROL_MODE CAR_CONTROL_MODE_ANGLE_DEBUG
+```
+
+八路 ADC 仍采样，但灰度方向环和丢线停车看门暂时不驱动电机。手机目标角经过 ANGLE
+PID、左右轮速度 PID、Motor 和 TB6612 完成原地转向。
+
+最终 UART 必须是：
+
+```text
+IMU  UART0 / PA10 TX / PA11 RX / 115200
+HC05 UART1 / PB4  TX / PB5  RX /   9600
+```
+
+江协参考程序默认 9600；若没有在 HC-05 的 AT 模式中明确改过波特率，就不要把 MSPM0
+端设成 115200。MCU TX 接模块 RX、MCU RX 接模块 TX，并且必须共地。
+
+### 16.2 手机控件映射
+
+PID 选择按键：
+
+```text
+key 1 = LINE
+key 2 = YAW
+key 3 = SPEED-L
+key 4 = SPEED-R
+key 5 = ANGLE
+```
+
+选择后由滑条修改：
+
+```text
+slider 1 = Kp
+slider 2 = Ki
+slider 3 = Kd
+slider 4 = 目标相对角度，范围 -180~+180 deg
+```
+
+其余按键：
+
+```text
+key 6 = plot 开关
+key 7 = 清所选 PID 历史，不改 Kp/Ki/Kd
+key 8 = OLED 下一逻辑页
+key 9 = 当前车头清零，同时把目标恢复 0 deg
+key status = 刷新 display
+```
+
+可直接发送的典型包：
+
+```text
+[key,5,down]       选择 ANGLE PID
+[slider,1,2.5]     ANGLE Kp = 2.5
+[slider,2,0]       ANGLE Ki = 0
+[slider,3,0.35]    ANGLE Kd = 0.35
+[slider,4,30]      转到相对 +30 deg
+[slider,4,-30]     转到相对 -30 deg
+[key,8,down]       OLED 翻页
+[key,9,down]       当前车头清零
+```
+
+协议兼容 `slide/slider/slides`，也兼容 `kp/ki/kd/angle/target` 等文本名称。key 8 应只
+发送一次 down；如果小程序同时发 down 和 up，会连续翻两页。
+
+### 16.3 手机与 OLED 诊断
+
+ANGLE 模式手机 display 每 500 ms 更新，显示：
+
+```text
+V/S      IMU 是否有效、是否稳定到位
+T/Y      目标角、实测角
+E/G      角度误差、Z 轴角速度
+K        ANGLE Kp/Ki/Kd
+RX/TXR   完整接收包数、发送拒绝数
+```
+
+plot 每 100 ms 更新：`y1=目标角度`，`y2=实测角度`。这两个周期是按 HC-05 的 9600
+bit/s 带宽选取的，不建议在保留五条 display 时把 plot 恢复到 25 Hz。
+
+OLED 逻辑页只由 key 8 手动切换：
+
+```text
+0 = ADC/循迹
+1 = 电机/编码器
+2 = IMU/ANGLE
+```
+
+ANGLE 模式上电默认页为 2。OLED 仍每次只发送一个 8 像素硬件页，这是为了避免软件
+I2C 整屏传输占用二十多毫秒并破坏 5 ms 控制环；这不再是自动切换逻辑页面。完整屏幕
+大约 0.32 s 更新一次。
+
+ANGLE 页的 `PKT` 是已解析完整蓝牙包数，`UERR` 是 UART 硬件错误数：
+
+```text
+PKT 不增长          -> 查 9600、HC-05 TX->PB5、共地
+PKT 增长但手机无显示 -> 查 PB4->HC-05 RX、小程序 display 配置、TXR
+UERR 增长           -> 查波特率、接线和信号质量
+```
+
+### 16.4 安全测试与方向修正
+
+当前 `empty.c` 有裸 `App_Car_Start();`，下载复位后会自动 RUN。第一次必须架空车轮或
+断开电机主电源。推荐：
+
+1. 无电机主电源下载，确认 OLED 第 2 页 `V=1`、IMU `FR` 增长；
+2. 手机连接后确认 0.5 s 内收到 `MODE:ANGLE`；
+3. 用 key 8 验证 `PKT` 增长和手动翻页；
+4. 用 key 9 清零；
+5. 手动向右转车身，确认 Y/G 按约定增加；
+6. 架空接电机，先测试目标 `+30` 和 `-30`；
+7. 停止与急停可靠后才低速落地。
+
+包外单字符 `R` 会重新启动并同时清 IMU yaw 与角度目标，所以必须先发 `R`，再发
+slider 4。若手动右转时 Y/G 反而减小，只修改 `CAR_IMU_YAW_POLARITY`；不要破坏已经
+验证的电机、编码器和循迹极性。
+
+完成定角调试后，把：
+
+```c
+#define CAR_CONTROL_MODE CAR_CONTROL_MODE_ANGLE_DEBUG
+```
+
+改回：
+
+```c
+#define CAR_CONTROL_MODE CAR_CONTROL_MODE_LINE
+```
+
+并执行 Clean Build，即可恢复循迹闭环。

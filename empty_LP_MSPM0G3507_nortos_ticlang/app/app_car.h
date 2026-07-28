@@ -27,7 +27,7 @@ void App_Car_Init(void);
 /** @brief 1 ms 任务：接收 500 Hz IMU、采样循迹并更新时间戳。 */
 void App_Car_SensorTask1ms(void);
 
-/** @brief 5 ms 任务：编码器、方向环、速度环和电机输出。 */
+/** @brief 5 ms 任务：编码器、所选方向/角度环、速度环和电机输出。 */
 void App_Car_ControlTask5ms(void);
 
 /** @brief 10 ms 任务：状态和丢线超时安全检查。 */

@@ -226,17 +226,17 @@
  *   - 打开 RX interrupt；TX interrupt 会由 BSP 在有待发数据时动态开关；
  *   - SysConfig 波特率必须与 HC-05 数据模式波特率一致。
  *
- * HC-05 常见出厂数据模式波特率是 9600，而本车 20 ms 一次的 CSV 遥测推荐
- * 115200。若模块仍是 9600，请先在 AT 模式修改模块波特率，或者同时把 SysConfig
- * 和下面的记录值改为 9600；只改本宏不会改变 UART 寄存器，实际硬件以 SysConfig
- * 为准。当前 empty.syscfg 已配置 UART1、PB4 TX、PB5 RX。PB4 在板卡资料中也标为 PWM
+ * 用户给出的江协 HC-05 参考工程使用 9600；当前为优先完成实物联调，MSPM0 也使用
+ * 9600。若以后已通过 AT 模式把模块改为 115200，必须同时修改 empty.syscfg 和下面
+ * 的记录值；只改本宏不会改变 UART 寄存器，实际硬件以 SysConfig 为准。
+ * 当前 empty.syscfg 已配置 UART1、PB4 TX、PB5 RX。PB4 在板卡资料中也标为 PWM
  * 候选，因此后续分配 TB6612 PWM 时必须避开 PB4；PB5 位于下方未焊接接口区域，
  * 请确认实物已经引出并保证 HC-05 与 MSPM0 共地。
  */
 #ifndef CAR_HC05_UART_READY
 #define CAR_HC05_UART_READY                 (1U)
 #endif
-#define CAR_HC05_UART_BAUD_RATE             (115200UL)
+#define CAR_HC05_UART_BAUD_RATE             (9600UL)
 
 #if CAR_HC05_UART_READY
 /* 若 SysConfig 实例不是 HC05_UART，只需要修改下面三个别名。 */

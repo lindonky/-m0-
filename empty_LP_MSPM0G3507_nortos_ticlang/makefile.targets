@@ -15,11 +15,22 @@ all: ./app/pid_debug.o
 empty_LP_MSPM0G3507_nortos_ticlang.out: ./app/pid_debug.o
 endif
 
+# Angle debug controller is another user-maintained source added after the last CCS refresh.
+# Use the same guarded injection until CCS regenerates control/subdir_vars.mk.
+ifeq ($(filter ./control/angle_control.o,$(OBJS)),)
+OBJS += ./control/angle_control.o
+ORDERED_OBJS := "./control/angle_control.o" $(ORDERED_OBJS)
+all: ./control/angle_control.o
+empty_LP_MSPM0G3507_nortos_ticlang.out: ./control/angle_control.o
+endif
+
 # app/subdir_rules.mk already provides the generic app/%.o rule. Include this module's dependency
 # file explicitly until CCS has regenerated app/subdir_vars.mk to list the new source itself.
 -include app/pid_debug.d
+-include control/angle_control.d
 
-.PHONY: pid_debug_clean
-clean: pid_debug_clean
-pid_debug_clean:
+.PHONY: user_modules_clean
+clean: user_modules_clean
+user_modules_clean:
 	-$(RM) "app\pid_debug.o" "app\pid_debug.d" "app\pid_debug.d_raw"
+	-$(RM) "control\angle_control.o" "control\angle_control.d" "control\angle_control.d_raw"

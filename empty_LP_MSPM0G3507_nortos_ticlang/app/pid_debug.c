@@ -12,12 +12,16 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "app/app_car.h"
+#include "app/app_debug.h"
 #include "bsp/bsp_time.h"
 #include "bsp/bsp_uart.h"
 #include "config/car_config.h"
+#include "control/angle_control.h"
 #include "control/line_control.h"
 #include "control/pid.h"
 #include "control/speed_control.h"
+#include "drivers/imu.h"
 #include "drivers/line_sensor.h"
 
 #define PID_DEBUG_RX_PACKET_SIZE (96U)
@@ -90,7 +94,8 @@ static char *take_field(char **cursor)
  * 有界十进制浮点解析，只接受普通 `[-]123.456`，不接受 NaN、Inf 或指数形式。
  * 不调用 atof/strtof，可明确检测非法尾随字符并避免不同 libc 的宽松行为。
  */
-static bool parse_decimal(const char *text, float *result)
+static bool parse_decimal_bounded(const char *text, float minimum,
+                                  float maximum, float *result)
 {
     bool negative = false;
     bool haveDigit = false;
@@ -106,6 +111,7 @@ static bool parse_decimal(const char *text, float *result)
     while ((*text >= '0') && (*text <= '9')) {
         haveDigit = true;
         value = value * 10.0f + (float) (*text - '0');
+        /* 先用协议绝对上限阻止超长十进制累乘，再按调用者范围做最终判断。 */
         if (value > CAR_PID_DEBUG_GAIN_MAX) return false;
         text++;
     }
@@ -122,7 +128,7 @@ static bool parse_decimal(const char *text, float *result)
 
     if (!haveDigit || (*text != '\0')) return false;
     if (negative) value = -value;
-    if ((value < 0.0f) || (value > CAR_PID_DEBUG_GAIN_MAX)) return false;
+    if ((value < minimum) || (value > maximum)) return false;
     *result = value;
     return true;
 }
@@ -132,6 +138,7 @@ static PID_Controller *selected_pid(void)
     switch (g_diagnostics.selectedLoop) {
     case PID_DEBUG_LOOP_LINE:        return LineControl_GetPID();
     case PID_DEBUG_LOOP_YAW_RATE:    return LineControl_GetYawRatePID();
+    case PID_DEBUG_LOOP_ANGLE:       return AngleControl_GetPID();
     case PID_DEBUG_LOOP_LEFT_SPEED:  return SpeedControl_GetLeftPID();
     case PID_DEBUG_LOOP_RIGHT_SPEED: return SpeedControl_GetRightPID();
     default:                         return LineControl_GetPID();
@@ -143,6 +150,7 @@ static const char *selected_name(void)
     switch (g_diagnostics.selectedLoop) {
     case PID_DEBUG_LOOP_LINE:        return "LINE";
     case PID_DEBUG_LOOP_YAW_RATE:    return "YAW";
+    case PID_DEBUG_LOOP_ANGLE:       return "ANGLE";
     case PID_DEBUG_LOOP_LEFT_SPEED:  return "SPEED-L";
     case PID_DEBUG_LOOP_RIGHT_SPEED: return "SPEED-R";
     default:                         return "UNKNOWN";
@@ -157,6 +165,9 @@ static bool select_loop_from_name(const char *name)
     } else if (ascii_equal_ignore_case(name, "2") ||
                ascii_equal_ignore_case(name, "yaw")) {
         g_diagnostics.selectedLoop = PID_DEBUG_LOOP_YAW_RATE;
+    } else if (ascii_equal_ignore_case(name, "5") ||
+               ascii_equal_ignore_case(name, "angle")) {
+        g_diagnostics.selectedLoop = PID_DEBUG_LOOP_ANGLE;
     } else if (ascii_equal_ignore_case(name, "3") ||
                ascii_equal_ignore_case(name, "left")) {
         g_diagnostics.selectedLoop = PID_DEBUG_LOOP_LEFT_SPEED;
@@ -188,8 +199,7 @@ static void handle_key(char *name, char *action)
 
     if (select_loop_from_name(name)) return;
 
-    if (ascii_equal_ignore_case(name, "5") ||
-        ascii_equal_ignore_case(name, "status")) {
+    if (ascii_equal_ignore_case(name, "status")) {
         g_displayDirty = true;
     } else if (ascii_equal_ignore_case(name, "6") ||
                ascii_equal_ignore_case(name, "plot")) {
@@ -199,6 +209,18 @@ static void handle_key(char *name, char *action)
                ascii_equal_ignore_case(name, "reset")) {
         /* 只清当前 PID 的积分/微分历史，不改变已经调好的 Kp/Ki/Kd。 */
         PID_Reset(selected_pid());
+        g_displayDirty = true;
+    } else if (ascii_equal_ignore_case(name, "8") ||
+               ascii_equal_ignore_case(name, "page")) {
+        uint8_t page = App_Debug_NextOLEDView();
+        (void) PIDDebug_Printf("[display,0,100,OLED PAGE:%u]",
+                               (unsigned int) page);
+    } else if (ascii_equal_ignore_case(name, "9") ||
+               ascii_equal_ignore_case(name, "zero")) {
+        /* 当前车头重新定义为 0 deg，同时停止旧目标并选择 ANGLE PID 页面。 */
+        IMU_ResetYaw();
+        AngleControl_Reset();
+        g_diagnostics.selectedLoop = PID_DEBUG_LOOP_ANGLE;
         g_displayDirty = true;
     } else {
         g_diagnostics.unknownPackets++;
@@ -210,7 +232,29 @@ static void handle_slider(char *name, char *textValue)
     PID_Controller *pid;
     float value;
 
-    if ((name == NULL) || !parse_decimal(textValue, &value)) {
+    if ((name == NULL) || (textValue == NULL)) {
+        g_diagnostics.rejectedValues++;
+        return;
+    }
+
+    /* slider 4/angle 是有符号目标角度，不属于 PID 增益。 */
+    if (ascii_equal_ignore_case(name, "4") ||
+        ascii_equal_ignore_case(name, "angle") ||
+        ascii_equal_ignore_case(name, "target")) {
+        if (!parse_decimal_bounded(textValue, CAR_ANGLE_TARGET_MIN_DEG,
+                                   CAR_ANGLE_TARGET_MAX_DEG, &value) ||
+            !AngleControl_SetTargetDegrees(value)) {
+            g_diagnostics.rejectedValues++;
+            return;
+        }
+        g_diagnostics.selectedLoop = PID_DEBUG_LOOP_ANGLE;
+        g_diagnostics.sliderPackets++;
+        g_displayDirty = true;
+        return;
+    }
+
+    if (!parse_decimal_bounded(textValue, 0.0f, CAR_PID_DEBUG_GAIN_MAX,
+                               &value)) {
         g_diagnostics.rejectedValues++;
         return;
     }
@@ -250,7 +294,8 @@ static void handle_packet(char *packet)
     if (ascii_equal_ignore_case(tag, "key")) {
         handle_key(name, valueOrAction);
     } else if (ascii_equal_ignore_case(tag, "slider") ||
-               ascii_equal_ignore_case(tag, "slide")) {
+               ascii_equal_ignore_case(tag, "slide") ||
+               ascii_equal_ignore_case(tag, "slides")) {
         handle_slider(name, valueOrAction);
     } else {
         g_diagnostics.unknownPackets++;
@@ -268,7 +313,11 @@ void PIDDebug_Init(void)
     g_discardingOverflow = false;
     g_displayDirty = true;
     g_diagnostics = (PIDDebug_Diagnostics) {0};
+#if CAR_CONTROL_MODE == CAR_CONTROL_MODE_ANGLE_DEBUG
+    g_diagnostics.selectedLoop = PID_DEBUG_LOOP_ANGLE;
+#else
     g_diagnostics.selectedLoop = PID_DEBUG_LOOP_LINE;
+#endif
     g_diagnostics.plotEnabled = (CAR_PID_DEBUG_PLOT_DEFAULT != 0U);
     g_nextPlotMs = now + CAR_PID_DEBUG_PLOT_PERIOD_MS;
     g_nextDisplayMs = now + CAR_PID_DEBUG_DISPLAY_PERIOD_MS;
@@ -387,6 +436,25 @@ static bool send_parameter_display(void)
 {
     const PID_Controller *pid = selected_pid();
 
+    if (g_diagnostics.selectedLoop == PID_DEBUG_LOOP_ANGLE) {
+        const AngleControl_Status *angle = AngleControl_GetStatus();
+        const IMU_Data *imu = IMU_GetData();
+
+        /* 手机蓝牙屏幕同时显示目标角、实测角、误差、角速度和当前角度 PID。 */
+        return PIDDebug_Printf(
+            "[display,0,0,MODE:ANGLE V:%u S:%u]"
+            "[display,0,20,T:%.1f Y:%.1f]"
+            "[display,0,40,E:%.1f G:%.1f]"
+            "[display,0,60,K:%.2f/%.2f/%.2f]"
+            "[display,0,80,RX:%lu TXR:%lu]",
+            imu->valid ? 1U : 0U, angle->settled ? 1U : 0U,
+            (double) angle->targetDegrees, (double) angle->measuredDegrees,
+            (double) angle->errorDegrees, (double) angle->gyroZDps,
+            (double) pid->kp, (double) pid->ki, (double) pid->kd,
+            (unsigned long) g_diagnostics.receivedPackets,
+            (unsigned long) g_diagnostics.txRejected);
+    }
+
     return PIDDebug_Printf(
         "[display,0,0,PID:%s]"
         "[display,0,20,Kp:%.3f Ki:%.3f]"
@@ -409,6 +477,10 @@ static void get_plot_values(float *target, float *measured)
         lineStatus = LineControl_GetStatus();
         *target = lineStatus->targetYawRateDps;
         *measured = lineStatus->measuredYawRateDps;
+        break;
+    case PID_DEBUG_LOOP_ANGLE:
+        *target = AngleControl_GetStatus()->targetDegrees;
+        *measured = AngleControl_GetStatus()->measuredDegrees;
         break;
     case PID_DEBUG_LOOP_LEFT_SPEED:
         speedStatus = SpeedControl_GetStatus();

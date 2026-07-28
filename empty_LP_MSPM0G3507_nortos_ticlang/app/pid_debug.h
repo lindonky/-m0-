@@ -24,6 +24,7 @@
 typedef enum {
     PID_DEBUG_LOOP_LINE = 0,
     PID_DEBUG_LOOP_YAW_RATE,
+    PID_DEBUG_LOOP_ANGLE,
     PID_DEBUG_LOOP_LEFT_SPEED,
     PID_DEBUG_LOOP_RIGHT_SPEED
 } PIDDebug_Loop;
@@ -43,7 +44,7 @@ typedef struct {
     bool plotEnabled;
 } PIDDebug_Diagnostics;
 
-/** @brief 复位文本包解析器，默认选择灰度方向 PID。 */
+/** @brief 复位文本包解析器；角度调试模式默认选择 ANGLE PID。 */
 void PIDDebug_Init(void);
 
 /**

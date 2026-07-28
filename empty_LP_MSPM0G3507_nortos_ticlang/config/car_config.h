@@ -81,6 +81,33 @@
 #define CAR_LINE_STEERING_LIMIT_MM_S       (300.0f)
 
 /*
+ * 当前控制模式。
+ *
+ * ANGLE_DEBUG 用于本轮陀螺仪角度闭环联调：暂时忽略灰度位置和丢线停车，只允许
+ * 车辆原地旋转。调试完成后把 CAR_CONTROL_MODE 改回 CAR_CONTROL_MODE_LINE，
+ * 原有循迹代码和参数仍完整保留，不需要重新移植。
+ */
+#define CAR_CONTROL_MODE_LINE              (0U)
+#define CAR_CONTROL_MODE_ANGLE_DEBUG       (1U)
+#define CAR_CONTROL_MODE                   CAR_CONTROL_MODE_ANGLE_DEBUG
+
+/*
+ * 相对角度闭环：进入/重新启动时当前车头为 0 deg，正值右转、负值左转。
+ * 目标限制为 -180~+180 deg，误差按最短方向折算到同一范围。PID 输出单位为
+ * 原地旋转时的单轮目标速度 mm/s，再交给现有左右轮速度 PID 跟踪。
+ */
+#define CAR_ANGLE_TARGET_MIN_DEG           (-180.0f)
+#define CAR_ANGLE_TARGET_MAX_DEG           (+180.0f)
+#define CAR_ANGLE_KP                       (2.50f)
+#define CAR_ANGLE_KI                       (0.0f)
+#define CAR_ANGLE_KD                       (0.35f)
+#define CAR_ANGLE_STEERING_LIMIT_MM_S      (180.0f)
+#define CAR_ANGLE_WHEEL_SPEED_LIMIT_MM_S   (220.0f)
+#define CAR_ANGLE_TOLERANCE_DEG            (2.0f)
+#define CAR_ANGLE_RATE_TOLERANCE_DPS       (5.0f)
+#define CAR_ANGLE_SETTLE_TIME_MS           (200U)
+
+/*
  * IMU 转向角速度内环。
  *
  * 普通循迹不能永久锁定一个“世界坐标绝对角度”，否则进入弯道后角度环会强迫车辆
@@ -143,13 +170,13 @@
 #define CAR_PID_DEBUG_ENABLE               (1U)
 #define CAR_DEBUG_CSV_ENABLE               (0U)
 #define CAR_PID_DEBUG_PLOT_DEFAULT         (1U)
-#define CAR_PID_DEBUG_PLOT_PERIOD_MS       (40U)
-#define CAR_PID_DEBUG_DISPLAY_PERIOD_MS    (1000U)
+#define CAR_PID_DEBUG_PLOT_PERIOD_MS       (100U)
+#define CAR_PID_DEBUG_DISPLAY_PERIOD_MS    (500U)
 #define CAR_PID_DEBUG_PACKET_TIMEOUT_MS    (250U)
 #define CAR_PID_DEBUG_GAIN_MAX             (10000.0f)
 
 /* 人机和遥测任务低频运行，避免占用 200 Hz 控制环时间。 */
 #define CAR_DEBUG_PERIOD_MS                (20U)
-#define CAR_OLED_PERIOD_MS                 (100U)
+#define CAR_OLED_PERIOD_MS                 (40U)
 
 #endif /* CAR_CONFIG_H */

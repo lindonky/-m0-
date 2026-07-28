@@ -62,7 +62,7 @@ void App_Scheduler_Run(void)
         App_Debug_Task();
     }
     if (due(now, g_nextOledMs)) {
-        /* OLED 软件 I2C 放在所有实时性更高的任务之后，并且每次只刷新一行。 */
+        /* OLED 软件 I2C 放在所有实时性更高的任务之后，并且每次只刷新一个 8 像素页。 */
         g_nextOledMs = now + CAR_OLED_PERIOD_MS;
         App_Debug_OLEDTask();
     }

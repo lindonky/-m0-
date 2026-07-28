@@ -1182,3 +1182,361 @@ LineControl_Update
 正式工程与工作副本的 `config/car_config.h`、`empty.c` SHA-256 均一致。若 CCS 编辑器
 仍打开修复前的旧文件并提示“磁盘内容已被外部修改”，必须选择从磁盘重新加载；不要
 保留旧编辑器内容后再保存，否则会再次覆盖这些配置和调度器调用。
+
+## 24. 2026-07-27 HC-05 手动页面与相对角度闭环调试模式
+
+> 本节记录当前最终状态。若本节与第 21、22、23 节中的旧默认值发生冲突，以本节和
+> 当前源码为准。旧章节保留是为了说明功能演进和已解决故障，不代表当前运行配置。
+
+### 24.1 本轮目标和最终结果
+
+这轮修改的目标不是继续自动循迹，而是先把 IMU、蓝牙协议、角度环和双轮速度环单独
+联调清楚。当前固件已经实现：
+
+1. 暂时旁路八路灰度循迹方向环，ADC 采样与诊断仍然保留；
+2. 手机滑条下发 `-180 deg ~ +180 deg` 的相对目标角；
+3. 角度 PID 输出原地转向速度，再经过原有左右轮速度 PID 和 TB6612；
+4. 手机 display 周期显示目标角、实测角、误差、角速度和角度 PID；
+5. 手机 plot 默认绘制“目标角度/实测角度”；
+6. OLED 不再自动切换诊断画面，改由 HC-05 `key 8` 手动翻页；
+7. 支持从手机选择 LINE、YAW、ANGLE、左轮速度、右轮速度五个 PID，并在线修改
+   `Kp/Ki/Kd`；
+8. HC-05 UART 已从 115200 改为参考程序实际使用的 9600，IMU UART 仍保持 115200；
+9. 全部接收 ISR 仍只搬运字节，协议解析、浮点格式化和参数修改仍在主循环低频任务；
+10. 没有加入 WFI、Sleep、STOP、Standby 或阻塞式毫秒延时。
+
+### 24.2 手机没有 display/plot 的首要根因
+
+用户提供的江协蓝牙参考工程中，`Hardware/Serial.c` 明确配置：
+
+```c
+USART_InitStructure.USART_BaudRate = 9600;
+```
+
+原 MSPM0 工程中的 HC-05 UART 一度配置为 115200。若 HC-05 没有先进入 AT 模式并改写
+其串口波特率，MCU 与模块之间波特率不一致，会同时造成：
+
+- 手机收不到 `[display,...]`；
+- 手机收不到 `[plot,...]`；
+- MCU 也无法正确解析手机下发的 `[key,...]` 和 `[slider,...]`；
+- OLED 上 UART 硬件错误计数可能增长。
+
+当前最终串口分配为：
+
+```text
+IMU_UART  = UART0，PA10 TX，PA11 RX，115200 bit/s
+HC05_UART = UART1，PB4  TX，PB5  RX，  9600 bit/s
+```
+
+SysConfig 生成结果已核对为 HC-05 `IBRD=260`、`FBRD=27`。手机与 HC-05 之间仍是无线
+蓝牙连接；这里的 9600 指 MCU 与 HC-05 模块之间的 TTL UART 波特率。接线必须交叉：
+
+```text
+MCU PB4 / TX -> HC-05 RX
+MCU PB5 / RX <- HC-05 TX
+MCU GND       -- HC-05 GND
+```
+
+### 24.3 为什么使用相对角度 -180 deg ~ +180 deg
+
+当前角度定义为：
+
+```text
+每次启动或执行清零时的车头方向 = 0 deg
+目标为正                         = 向右转
+目标为负                         = 向左转
+允许下发范围                     = -180 deg ~ +180 deg
+```
+
+没有使用 `0 deg ~ 360 deg`，因为有符号角更容易直接表达左右方向；角度误差会折算到
+`[-180 deg, +180 deg]`，因此跨越边界时始终选择较短的旋转方向。例如当前位置
+`+170 deg`、目标 `-170 deg` 时，控制器使用约 `+20 deg` 的误差，而不是反向旋转
+`340 deg`。
+
+### 24.4 角度闭环的实际控制链
+
+新增模块：
+
+```text
+control/angle_control.c
+control/angle_control.h
+```
+
+实际数据链是：
+
+```text
+[slider,4,target]
+        |
+        v
+ANGLE 角度 PID
+        |
+        | steeringMmS
+        v
+VehicleMixer_Mix(0, steeringMmS)
+        |
+        +--> 左轮目标 +steeringMmS
+        +--> 右轮目标 -steeringMmS
+                  |
+                  v
+        左右轮编码器速度 PID
+                  |
+                  v
+        Motor 斜坡、限幅、极性
+                  |
+                  v
+               TB6612
+```
+
+角度环没有直接写 PWM，也没有绕过已验证的电机和编码器层。这样既保留两轮速度一致性，
+也继续受到 PWM 限幅、电机斜坡、STBY 和急停保护。IMU 无效或处于陀螺仪标定状态时，
+`AngleControl_Update()` 输出 0，车辆不会在没有可信角度反馈时盲目旋转。
+
+当前编译默认值集中在 `config/car_config.h`：
+
+```c
+#define CAR_CONTROL_MODE                   CAR_CONTROL_MODE_ANGLE_DEBUG
+#define CAR_ANGLE_TARGET_MIN_DEG           (-180.0f)
+#define CAR_ANGLE_TARGET_MAX_DEG           (+180.0f)
+#define CAR_ANGLE_KP                       (2.50f)
+#define CAR_ANGLE_KI                       (0.0f)
+#define CAR_ANGLE_KD                       (0.35f)
+#define CAR_ANGLE_STEERING_LIMIT_MM_S      (180.0f)
+#define CAR_ANGLE_WHEEL_SPEED_LIMIT_MM_S   (220.0f)
+#define CAR_ANGLE_TOLERANCE_DEG            (2.0f)
+#define CAR_ANGLE_RATE_TOLERANCE_DPS       (5.0f)
+#define CAR_ANGLE_SETTLE_TIME_MS           (200U)
+```
+
+只有同时满足“角度误差不超过 2 deg”和“角速度不超过 5 deg/s”，并连续保持 200 ms，
+才判定 `settled=true` 并把角度环输出归零。若外力再次使车身离开容差，闭环会重新纠正。
+
+### 24.5 临时停用循迹的方法
+
+模式由一个集中宏控制：
+
+```c
+#define CAR_CONTROL_MODE_LINE              (0U)
+#define CAR_CONTROL_MODE_ANGLE_DEBUG       (1U)
+#define CAR_CONTROL_MODE                   CAR_CONTROL_MODE_ANGLE_DEBUG
+```
+
+当前为 `CAR_CONTROL_MODE_ANGLE_DEBUG`，因此 5 ms 控制任务将前进速度固定为 0，只执行
+原地定角；灰度 ADC 仍持续采样并可在 OLED 第 0 页观察，但灰度方向 PID 和丢线停车看门
+不会参与电机控制。角度调试完成后，只需把最后一个宏改回：
+
+```c
+#define CAR_CONTROL_MODE CAR_CONTROL_MODE_LINE
+```
+
+然后 Clean Build，即可恢复“灰度位置外环 + IMU 角速度内环 + 双轮速度环”的循迹链。
+原有循迹参数、标定值和方向极性均未删除。
+
+### 24.6 江协小程序 key 映射
+
+当前 ANGLE 调试模式默认选中 ANGLE PID。按键映射为：
+
+| 手机命令 | 作用 |
+|---|---|
+| `[key,1,down]` 或 `[key,line,down]` | 选择灰度位置 LINE PID |
+| `[key,2,down]` 或 `[key,yaw,down]` | 选择循迹角速度 YAW PID |
+| `[key,3,down]` 或 `[key,left,down]` | 选择左轮速度 PID |
+| `[key,4,down]` 或 `[key,right,down]` | 选择右轮速度 PID |
+| `[key,5,down]` 或 `[key,angle,down]` | 选择原地定角 ANGLE PID |
+| `[key,6,down]` 或 `[key,plot,down]` | 开关 plot 周期发送 |
+| `[key,7,down]` 或 `[key,reset,down]` | 清所选 PID 的积分/微分历史，不改增益 |
+| `[key,8,down]` 或 `[key,page,down]` | OLED 下一诊断页 |
+| `[key,9,down]` 或 `[key,zero,down]` | 当前车头清零、目标归零并选中 ANGLE PID |
+| `[key,status,down]` | 立即请求刷新手机 display |
+
+代码兼容 `down/up/click/press` 四种动作。但 `key 6` 和 `key 8` 都是“收到一次合法包就
+切换一次”，所以江协小程序按钮应只配置一次 `down`，不要同一按键同时发送 down 和
+up，否则会开关两次或连翻两页，看起来像没有动作。
+
+### 24.7 slider 映射和在线修改 PID 的实际代码路径
+
+选择某个 PID 后，使用：
+
+```text
+[slider,1,value] 或 [slide,kp,value] -> 修改所选 PID 的 Kp
+[slider,2,value] 或 [slide,ki,value] -> 修改所选 PID 的 Ki
+[slider,3,value] 或 [slide,kd,value] -> 修改所选 PID 的 Kd
+```
+
+实现不是占位：`pid_debug.c` 先通过 `selected_pid()` 取得实际 PID 对象，再调用：
+
+```c
+PID_SetTunings(pid, value, pid->ki, pid->kd);  /* Kp */
+PID_SetTunings(pid, pid->kp, value, pid->kd);  /* Ki */
+PID_SetTunings(pid, pid->kp, pid->ki, value);  /* Kd */
+```
+
+可被选择和修改的五个对象分别来自：
+
+```text
+LineControl_GetPID()          -> 灰度位置环
+LineControl_GetYawRatePID()   -> 循迹角速度环
+AngleControl_GetPID()         -> 原地定角环
+SpeedControl_GetLeftPID()     -> 左轮速度环
+SpeedControl_GetRightPID()    -> 右轮速度环
+```
+
+目标角度单独占用 slider 4：
+
+```text
+[slider,4,-90]
+[slide,angle,90]
+[slides,target,180]
+```
+
+协议标签同时兼容 `slider/slide/slides`。目标角允许负值并严格限制在 -180~+180；PID
+增益只允许 `0~CAR_PID_DEBUG_GAIN_MAX`。在线修改只作用于 RAM，复位或重新下载后恢复
+`car_config.h` 中的编译默认值。
+
+### 24.8 手机 display、plot 和发送带宽
+
+ANGLE 页面每 500 ms 周期发送以下五条 display：
+
+```text
+[display,0,0,MODE:ANGLE V:... S:...]
+[display,0,20,T:... Y:...]
+[display,0,40,E:... G:...]
+[display,0,60,K:Kp/Ki/Kd]
+[display,0,80,RX:... TXR:...]
+```
+
+字段含义：
+
+```text
+V   = IMU 数据有效
+S   = 角度已经稳定到位
+T   = 目标相对角度 deg
+Y   = IMU 实测相对偏航角 deg
+E   = 已折算到 [-180,+180] 的角度误差 deg
+G   = IMU Z 轴角速度 deg/s
+K   = 当前 ANGLE PID 的 Kp/Ki/Kd
+RX  = MCU 已收到并解析的完整方括号包数
+TXR = UART TX 队列空间不足导致的发送拒绝数
+```
+
+ANGLE 默认 plot 为：
+
+```text
+y1 = 目标角度 T
+y2 = 实测角度 Y
+```
+
+HC-05 改为 9600 后，发送周期已降低为：
+
+```c
+#define CAR_PID_DEBUG_PLOT_PERIOD_MS       (100U)  /* 10 Hz */
+#define CAR_PID_DEBUG_DISPLAY_PERIOD_MS    (500U)  /* 2 Hz  */
+```
+
+约 960 byte/s 是 9600 bit/s、8N1 UART 的理论有效上限。当前 display 与 plot 的平均
+负载约 560 byte/s，留有必要余量。不要把 plot 恢复到 25 Hz 后仍同时高频发送五条
+display，否则 TX 队列会拥塞，`TXR` 会持续增长。
+
+### 24.9 OLED 手动页面和“分段刷新”的含义
+
+OLED 逻辑页面已经取消自动轮换：
+
+```text
+第 0 页 = 八路 ADC / 循迹诊断
+第 1 页 = 电机 / 编码器诊断
+第 2 页 = IMU / ANGLE 诊断
+```
+
+ANGLE 模式上电默认显示第 2 页。只有收到 `[key,8,down]` 或 `[key,page,down]` 才切换
+逻辑页面。
+
+需要区分“逻辑页面切换”和“SSD1306 物理传输”。逻辑页面已经完全手动；但每次 OLED
+任务仍只发送一条 8 像素高的 SSD1306 硬件页。原因是 128x64 软件 I2C 整屏需要发送
+1024 个显存字节，实测量级会占用二十多毫秒，足以破坏 5 ms 角度控制节拍。当前每
+40 ms 发送一条硬件页，八条约 0.32 s 完成一整屏，运动控制实时性显著更安全。
+
+ANGLE OLED 页字段为：
+
+```text
+ANGLE S / V / SET       车辆状态、IMU 有效、是否到位
+T10 / Y10               目标角、实测角，均放大 10 倍
+E10 / G10               误差、角速度，均放大 10 倍
+OUT / CNT               角度环转向输出、稳定累计周期
+KP100 / KI              Kp 放大 100 倍、Ki 放大 100 倍
+KD100 / TXR             Kd 放大 100 倍、UART TX 拒绝数
+FR / CRC                IMU 有效帧数、CRC 错误数
+PKT / UERR              完整蓝牙包数、UART 硬件错误数
+```
+
+手机每发一次完整 `[key,...]` 或 `[slider,...]`，`PKT` 应增加。可用它快速分段定位：
+
+- `PKT` 不增加：先查 9600、HC-05 TX 到 PB5、交叉接线和共地；
+- `PKT` 增加但手机没有 display：查 PB4 到 HC-05 RX、小程序 display 控件和 TXR；
+- `UERR` 增加：通常是波特率不一致、接线接触或串口电平/信号质量问题；
+- `TXR` 增加：发送流量过高或 TX 队列空间不足，应降低 plot/display 频率。
+
+### 24.10 推荐的安全上板顺序
+
+当前 `empty.c` 仍保留用户主动启用的裸 `App_Car_Start();`，所以固件下载并复位后会
+自动进入 RUN。默认角度目标为 0，正常情况下不会主动转动，但任何方向符号错误、IMU
+异常或旧机械运动都可能造成输出。第一次测试必须架空车轮，最好先断开电机主电源。
+
+推荐顺序：
+
+1. 断开电机主电源，只给 MCU、OLED、IMU、HC-05 供电并下载固件；
+2. OLED 应默认进入 ANGLE 页，确认 `V=1`、`FR` 持续增加、`CRC` 基本不增长；
+3. 连接手机，等待约 0.5 s，应看到 `MODE:ANGLE` 和 `T/Y/E/G/K`；
+4. 发送 `[key,8,down]`，确认 OLED 页面改变且 `PKT` 增加 1；
+5. 发送 `[key,9,down]`，或包外发送单字符 `G`，把当前车头定义为 0；
+6. 手动向右转动车身，确认 OLED/手机上的 `Y` 和 `G` 按约定增大；
+7. 架空车轮并接电机电源，先发 `[slider,4,30]`，观察车辆趋向右转；
+8. 再发 `[slider,4,-30]`，观察车辆趋向左转；
+9. 架空验证停止和急停后，才允许低速落地测试 `+/-30 deg`；
+10. 参数稳定后再逐步测试 `+/-90 deg`，最后才考虑接近 `+/-180 deg`。
+
+每次包外发送 `R` 调用 `App_Car_Start()` 时都会执行 `IMU_ResetYaw()` 和
+`AngleControl_Reset()`，因此会把当前方向和目标都恢复为 0。正确操作顺序是先发送
+`R`，再发送 slider 4 目标角；不要反过来。
+
+方向判断只允许按下列规则修正：
+
+```text
+手动向右转，Y/G 反而减小  -> 只修改 CAR_IMU_YAW_POLARITY
+正目标使整车实际左转      -> 立即停机，检查 VehicleMixer 与两轮物理正方向
+```
+
+不要为了补偿 IMU 安装方向去修改已经实车验证的 `CAR_LINE_STEERING_POLARITY`、电机
+极性或编码器极性。
+
+### 24.11 最终构建和链接证据
+
+本轮已新增 `control/angle_control.c/.h`，并通过用户维护的 `makefile.targets` 加入构建。
+正式工程已执行 `gmake clean` 和 `gmake -j4 all`，SysConfig、全部 C 文件、链接和 HEX
+生成均成功，退出码为 0。最后一次记录的主要产物为：
+
+```text
+empty_LP_MSPM0G3507_nortos_ticlang.out  412488 bytes  2026-07-27 18:26:55
+empty_LP_MSPM0G3507_nortos_ticlang.hex   83417 bytes  2026-07-27 18:26:55
+empty_LP_MSPM0G3507_nortos_ticlang.map   78616 bytes
+control/angle_control.o                    7940 bytes
+app/pid_debug.o                           46408 bytes
+```
+
+map 已确认包含：
+
+```text
+AngleControl_Init
+AngleControl_Reset
+AngleControl_SetTargetDegrees
+AngleControl_Update
+AngleControl_GetPID
+AngleControl_GetStatus
+PIDDebug_PushRxByte
+PIDDebug_Printf
+PIDDebug_Task
+App_Debug_NextOLEDView
+App_Scheduler_Run
+```
+
+`app_car.o` 明确引用 `AngleControl_Update` 和 `VehicleMixer_Mix`，在当前条件编译模式下
+不引用 `LineControl_Update`，这证明运行中的电机控制链确实是定角模式，而不是仅仅在
+界面上显示角度。最终源代码扫描未发现 MCU 低功耗调用。

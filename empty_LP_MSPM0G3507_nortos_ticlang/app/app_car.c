@@ -9,6 +9,7 @@
 #include "bsp/bsp_board.h"
 #include "bsp/bsp_time.h"
 #include "config/car_config.h"
+#include "control/angle_control.h"
 #include "control/line_control.h"
 #include "control/speed_control.h"
 #include "control/vehicle_mixer.h"
@@ -31,6 +32,7 @@ void App_Car_Init(void)
     /* UART 未配置时 IMU_Init 安全返回 false；协议状态仍会被复位。 */
     (void) IMU_Init();
     LineControl_Init();
+    AngleControl_Init();
     SpeedControl_Init();
     g_lastLineSeenMs = BSP_Time_GetMs();
     /* 上电明确停在 IDLE，不自动调用 Start，防止下载后车辆突然运动。 */
@@ -54,7 +56,6 @@ void App_Car_ControlTask5ms(void)
     const Encoder_Data *right;
     const IMU_Data *imu;
     const IMU_Diagnostics *imuDiagnostics;
-    LineControl_Output lineOutput;
     WheelSpeed_Targets targets;
 
     /* 编码器无论车辆状态如何都更新，便于停车时观察外力推动和诊断。 */
@@ -65,6 +66,22 @@ void App_Car_ControlTask5ms(void)
     imuDiagnostics = IMU_GetDiagnostics();
 
     if (g_state == CAR_STATE_RUNNING) {
+#if CAR_CONTROL_MODE == CAR_CONTROL_MODE_ANGLE_DEBUG
+        float steeringMmS;
+
+        /*
+         * 角度调试模式完全旁路灰度方向环：前进速度固定为 0，左右轮目标互为相反数，
+         * 只做原地定角。IMU 无效或正在静止标定时角度控制器返回 0，车辆不会盲转。
+         */
+        steeringMmS = AngleControl_Update(imu->yawDegrees, imu->gyroZDps,
+                                          imu->valid &&
+                                              !imuDiagnostics->calibrating,
+                                          CAR_CONTROL_PERIOD_S);
+        targets = VehicleMixer_Mix(0.0f, steeringMmS,
+                                   CAR_ANGLE_WHEEL_SPEED_LIMIT_MM_S);
+#else
+        LineControl_Output lineOutput;
+
         /*
          * 灰度方向环先给基础转向，IMU 有效且未在静止标定时再由角速度内环修正；
          * 随后才混合为左右轮目标。IMU 超时会在 LineControl 内自动回退灰度控制。
@@ -77,6 +94,7 @@ void App_Car_ControlTask5ms(void)
         targets = VehicleMixer_Mix(lineOutput.forwardMmS,
                                    lineOutput.steeringMmS,
                                    CAR_MAX_WHEEL_SPEED_MM_S);
+#endif
         SpeedControl_Update(targets.leftMmS, targets.rightMmS,
                             left->speedMmS, right->speedMmS,
                             CAR_CONTROL_PERIOD_S);
@@ -91,6 +109,7 @@ void App_Car_ControlTask5ms(void)
 
 void App_Car_StateTask10ms(void)
 {
+#if CAR_CONTROL_MODE == CAR_CONTROL_MODE_LINE
     /* 短时丢线由 LineControl 搜索，超过阈值才转入安全停止状态。 */
     if ((g_state == CAR_STATE_RUNNING) &&
         (App_Car_GetLineLostTimeMs() >= CAR_LINE_LOST_STOP_MS)) {
@@ -99,6 +118,9 @@ void App_Car_StateTask10ms(void)
         SpeedControl_Reset();
         g_state = CAR_STATE_LINE_LOST;
     }
+#else
+    /* 角度调试模式不使用灰度阵列，因此绝不能由丢线看门误停原地定角。 */
+#endif
 }
 
 void App_Car_Start(void)
@@ -107,6 +129,11 @@ void App_Car_Start(void)
     if ((g_state == CAR_STATE_FAULT) || LineSensor_IsCalibrating()) return;
     Encoder_Reset();
     LineControl_Reset();
+    AngleControl_Reset();
+#if CAR_CONTROL_MODE == CAR_CONTROL_MODE_ANGLE_DEBUG
+    /* 每次 R/上电重新启动都把当时车头作为相对 0 deg。 */
+    IMU_ResetYaw();
+#endif
     SpeedControl_Reset();
     Motor_ClearEmergencyStop();
     Motor_SetStopMode(TB6612_STOP_COAST);
@@ -121,6 +148,7 @@ void App_Car_Stop(void)
     /* 拉低 STBY 后最终为高阻安全停机；BRAKE 模式只影响禁用前的零指令过程。 */
     Motor_SetStopMode(TB6612_STOP_BRAKE);
     Motor_Enable(false);
+    AngleControl_Reset();
     SpeedControl_Reset();
     g_state = CAR_STATE_STOPPED;
 }
@@ -129,6 +157,7 @@ void App_Car_EmergencyStop(void)
 {
     /* EmergencyStop 在电机层锁存，必须由后续明确恢复流程清除。 */
     Motor_EmergencyStop();
+    AngleControl_Reset();
     SpeedControl_Reset();
     g_state = CAR_STATE_FAULT;
 }

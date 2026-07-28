@@ -159,9 +159,9 @@ bool SYSCFG_DL_SYSCTL_SYSPLL_init(void);
 #define GPIO_HC05_UART_IOMUX_TX                                  (IOMUX_PINCM17)
 #define GPIO_HC05_UART_IOMUX_RX_FUNC                   IOMUX_PINCM18_PF_UART1_RX
 #define GPIO_HC05_UART_IOMUX_TX_FUNC                   IOMUX_PINCM17_PF_UART1_TX
-#define HC05_UART_BAUD_RATE                                             (115200)
-#define HC05_UART_IBRD_40_MHZ_115200_BAUD                                   (21)
-#define HC05_UART_FBRD_40_MHZ_115200_BAUD                                   (45)
+#define HC05_UART_BAUD_RATE                                               (9600)
+#define HC05_UART_IBRD_40_MHZ_9600_BAUD                                    (260)
+#define HC05_UART_FBRD_40_MHZ_9600_BAUD                                     (27)
 
 
 
